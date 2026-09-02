@@ -35,17 +35,14 @@ verbatim, and they are parsed at most once per selected DID (see codec_compile).
 """
 import argparse
 import importlib.util
-import sys as _sys
-from pathlib import Path as _Path
-
-_sys.path.insert(0, str(_Path(__file__).resolve().parent))
-import glossary  # noqa: E402
-
-import importlib.util
 import json
 import struct
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import db_overrides  # noqa: E402
+import glossary  # noqa: E402
 
 # 2 added the energy-meter sections. The reader requires an exact match, so a
 # firmware paired with an older database fails loudly instead of silently
@@ -249,6 +246,9 @@ def main() -> int:
         return 1
 
     dps = json.loads((src / "Open3Edatapoints.json").read_text(encoding="utf-8"))
+    fixed = db_overrides.apply_to_json(dps)
+    print(f"  overrides      {fixed['units']} units, "
+          f"{fixed['sensor_error']} sensor error enums")
     vars_ = json.loads((src / "Open3EdatapointsVariants.json").read_text(encoding="utf-8"))
     enums = load_enums(src / "Open3Eenums.py")
 

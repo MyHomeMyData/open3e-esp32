@@ -11,6 +11,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import db_overrides  # noqa: E402
+
 TZ = "Europe/Berlin"
 
 
@@ -44,6 +47,14 @@ def main() -> int:
     C.flag_binary = False
 
     dids = D.dataIdentifiers["dids"]
+
+    # Same corrections the firmware's database carries, so the C port and
+
+    # open3e are compared on identical definitions.
+
+    n = db_overrides.apply_to_codecs(dids, C)
+
+    print(f"applied {n} sensor error enums", file=sys.stderr)
     vectors = json.loads(args.input.read_text(encoding="utf-8"))
 
     out = []

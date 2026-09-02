@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Corrections applied to open3e's datapoint definitions on the way in.
+
+open3e's database is the authority on layout, and nothing here changes that.
+What it does change is metadata open3e leaves blank because it does not need
+it: units, and the enumeration behind a sensor's error byte. Both matter here
+because Home Assistant builds its entity out of them -- a value with no unit
+gets no device class, no statistics and no place on a dashboard.
+
+Two rules only, both narrow, both verified against the whole database rather
+than guessed:
+
+  * A leaf with no unit whose datapoint name says what it measures gets that
+    unit. 131 fields gain one; the 530 that already have one are never
+    touched.
+  * A subfield named `Error` becomes an enumeration over `SensorStates`. All
+    twenty datapoints in the database with such a field are named `*Sensor`
+    and carry a single byte there, so the rule cannot catch anything else.
+
+Applied in two places that must not drift apart: gen_dpdb.py patches the JSON
+that becomes the firmware's database, and the fixture generators patch the
+Python codec objects they compare against. Skipping the second would make the
+test suite fail on a difference that was intended.
+"""
+import re
+
+# Deliberately short. A wrong unit is worse than none: Home Assistant will
+# attach a device class to it and present the number as authoritative. Rules
+# for `Runtime` and `PowerConsumption` were considered and dropped -- the
+# database gives no way to tell hours from minutes for QuickModeRuntime.
+UNIT_RULES = [
+    (re.compile(r"TemperatureSensor$"), "°C"),
+    (re.compile(r"HumiditySensor$"),    "%"),
+    (re.compile(r"VolumeFlowSensor$"),  "m³/h"),
+    (re.compile(r"OperationHours$"),    "h"),
+]
+
+NUMERIC = {"O3EInt8", "O3EInt16", "O3EInt32", "O3EInt64",
+           "O3EByteVal", "O3EFloat32"}
+
+SENSOR_ERROR_FIELD = "Error"
+SENSOR_ERROR_ENUM = "SensorStates"
+
+
+def unit_for(dp_name: str) -> str | None:
+    for pattern, unit in UNIT_RULES:
+        if pattern.search(dp_name):
+            return unit
+    return None
+
+
+def _is_sensor_error(dp_name: str, sub_id: str, codec: str) -> bool:
+    return (sub_id == SENSOR_ERROR_FIELD
+            and codec == "O3EByteVal"
+            and dp_name.endswith("Sensor"))
+
+
+def apply_to_json(dps: dict) -> dict:
+    """Patch Open3Edatapoints.json in place. Returns a count per change."""
+    stats = {"units": 0, "sensor_error": 0}
+    for key, dp in dps.items():
+        if not (key.isdigit() and isinstance(dp, dict)):
+            continue
+        name = dp.get("id", "")
+        unit = unit_for(name)
+        subs = dp["args"].get("subTypes") if dp["codec"] == "O3EComplexType" else None
+
+        if subs is None:
+            if unit and dp["codec"] in NUMERIC and not dp["args"].get("unit"):
+                dp["args"]["unit"] = unit
+                stats["units"] += 1
+            continue
+
+        for sub in subs:
+            if _is_sensor_error(name, sub.get("id", ""), sub["codec"]):
+                sub["codec"] = "O3EEnum"
+                sub["args"] = {"listStr": SENSOR_ERROR_ENUM,
+                               **{k: v for k, v in sub["args"].items()
+                                  if k in ("desc", "info", "acc")}}
+                stats["sensor_error"] += 1
+            elif unit and sub["codec"] in NUMERIC and not sub["args"].get("unit"):
+                sub["args"]["unit"] = unit
+                stats["units"] += 1
+    return stats
+
+
+def apply_to_codecs(dids: dict, C) -> int:
+    """Patch the constructed open3e codec objects the fixtures are built from.
+
+    Only the enumeration matters here: a unit never reaches a decoded value,
+    so patching it would change nothing the fixtures can see.
+    """
+    n = 0
+    for codec in dids.values():
+        name = getattr(codec, "id", "") or ""
+        subs = getattr(codec, "subTypes", None)
+        if not subs or not name.endswith("Sensor"):
+            continue
+        for i, sub in enumerate(subs):
+            if (getattr(sub, "id", "") == SENSOR_ERROR_FIELD
+                    and type(sub).__name__ == "O3EByteVal"):
+                subs[i] = C.O3EEnum(sub.string_len, sub.id, SENSOR_ERROR_ENUM)
+                n += 1
+    return n

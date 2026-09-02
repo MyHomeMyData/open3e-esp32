@@ -21,6 +21,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import db_overrides  # noqa: E402
+
 # open3e's O3EUtc/O3EDateTime call datetime.fromtimestamp(), which is local
 # time.  Pin the zone so fixtures are reproducible; open3e's own test suite
 # does the same (tests/integration/conftest.py).
@@ -153,6 +156,10 @@ def main() -> int:
     rng = random.Random(args.seed)
     dids = D.dataIdentifiers["dids"]
 
+    # Same corrections the firmware's database carries, so the C port and
+    # open3e are compared on identical definitions.
+    n = db_overrides.apply_to_codecs(dids, C)
+    print(f"applied {n} sensor error enums", file=sys.stderr)
     vectors, failed = [], {}
     for did in sorted(dids):
         codec = dids[did]

@@ -49,6 +49,29 @@ static void device_id(char *out, size_t out_sz)
 /* One config topic per published scalar. In JSON mode a value_template picks
  * the field out of the payload; in flat mode the field already has its own
  * topic and no template is needed. */
+/* Home Assistant keeps long-term statistics, and admits a sensor to the energy
+ * dashboard, only when the state class suits the device class. An energy
+ * reading marked `measurement` is rejected outright -- that is what an entity
+ * page saying "no statistics found" is reporting.
+ *
+ * The rolling windows are the exception. Past7Days, PastMonth and PastYear
+ * fall as well as rise, and `total_increasing` reads every fall as a counter
+ * reset and books the entire new value as fresh consumption. Those get no
+ * state class rather than a wrong one: no statistics is a gap, invented
+ * kilowatt-hours are a lie. */
+static const char *state_class_for(const char *device_class, const char *field)
+{
+    bool counter = strcmp(device_class, "energy") == 0
+                || strcmp(device_class, "duration") == 0;
+    if (!counter) {
+        return "measurement";
+    }
+    if (field && strncmp(field, "Past", 4) == 0) {
+        return NULL;
+    }
+    return "total_increasing";
+}
+
 static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
                            const char *state_topic, const char *object_id,
                            const char *name, const o3e_node_t *leaf,
@@ -88,7 +111,11 @@ static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
         if (dc) {
             o3e_buf_adds(&b, ", \"device_class\": ");
             o3e_buf_add_json_str(&b, dc);
-            o3e_buf_adds(&b, ", \"state_class\": \"measurement\"");
+            const char *sc = state_class_for(dc, leaf->id);
+            if (sc) {
+                o3e_buf_adds(&b, ", \"state_class\": ");
+                o3e_buf_add_json_str(&b, sc);
+            }
         }
     }
 
@@ -102,7 +129,12 @@ static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     o3e_buf_adds(&b, ", \"device\": {\"identifiers\": [");
     o3e_buf_add_json_str(&b, dev_id);
     o3e_buf_adds(&b, "], \"manufacturer\": \"Viessmann\", \"model\": \"E3 via open3e\""
-                     ", \"name\": \"open3e Gateway\", \"sw_version\": ");
+                     ", \"name\": ");
+    /* The base topic, because one household can run more than one of these --
+     * one on the storage bus, one on the ventilation unit -- and two devices
+     * both called "open3e Gateway" are told apart only by a MAC address. */
+    o3e_buf_add_json_str(&b, cfg->base_topic[0] ? cfg->base_topic : "open3e Gateway");
+    o3e_buf_adds(&b, ", \"sw_version\": ");
     o3e_buf_add_json_str(&b, o3e_db_version());
     o3e_buf_adds(&b, "}}");
 
