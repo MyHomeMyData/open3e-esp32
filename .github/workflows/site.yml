@@ -35,6 +35,11 @@ jobs:
         # so git refuses to read the repository without this.
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Host build dependencies
+        # The host suite links against the system cJSON, which the ESP-IDF
+        # image has no reason to carry.
+        run: apt-get update -qq && apt-get install -y -qq libcjson-dev
+
       - name: Fetch open3e and build the datapoint database
         # data/ is gitignored: the database is generated from pinned upstream
         # commits, so without this step the storage partition would be empty.
@@ -79,13 +84,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v rsync >/dev/null || { apt-get update -qq && apt-get install -y -qq rsync openssh-client; }
+          command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq openssh-client; }
           install -d -m 700 ~/.ssh
           printf '%s\n' "$KEY" > ~/.ssh/id_deploy
           chmod 600 ~/.ssh/id_deploy
-          # Pinned host key rather than StrictHostKeyChecking=no: without it the
-          # deploy would trust whatever answers, which is the whole attack.
+          # A pinned host key rather than StrictHostKeyChecking=no: without it
+          # the deploy would trust whatever answers, which is the whole attack.
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          rsync -az --human-readable \
-                -e "ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes" \
-                build/site/ "$HOST:$PATH_ON_HOST/"
+          # tar, not rsync: same reason as `make deploy` -- the target has no
+          # rsync, and nothing here is worth installing one for.
+          tar -C build/site -czf - . | \
+            ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes "$HOST" \
+                "mkdir -p '$PATH_ON_HOST' && tar -C '$PATH_ON_HOST' -xzf -"
