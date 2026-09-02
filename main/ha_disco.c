@@ -301,8 +301,24 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
     char topic[352];
     snprintf(topic, sizeof(topic), "%s/%s/%s/%s_set/config",
              cfg->ha_prefix, component, dev_id, object_id);
+
+    /* Retract the other kind of control for this leaf.
+     *
+     * A discovery config is retained, so the broker keeps handing it to Home
+     * Assistant until something overwrites it. Giving a number a set of labels
+     * turns it from a number into a select -- and without this, the number's
+     * config would sit there for ever and the entity would never change. The
+     * symptom is that entering labels appears to do nothing at all. */
+    {
+        char stale[352];
+        snprintf(stale, sizeof(stale), "%s/%s/%s/%s_set/config", cfg->ha_prefix,
+                 (component[0] == 's') ? "number" : "select", dev_id, object_id);
+        mqtt_pub_raw(stale, "", true);
+    }
+
     if (clear) {
         mqtt_pub_raw(topic, "", true);
+        n_controls++;
         return;
     }
 

@@ -290,10 +290,14 @@ int main(int argc, char **argv)
             cJSON_Delete(j);
         }
     }
-    /* The number control must be gone, or Home Assistant shows both. */
-    ok("no spin box alongside the select",
-       find("homeassistant/number/open3e_112233/680_437_BypassStatus_set/config") == NULL,
-       NULL);
+    /* A discovery config is retained. Publishing the select is not enough --
+       the number's config would keep being handed to Home Assistant until it
+       is overwritten with an empty payload, and the entity would never change
+       kind. This is what made entering labels look like it did nothing. */
+    m = find("homeassistant/number/open3e_112233/680_437_BypassStatus_set/config");
+    ok("the number's config is retracted, not merely abandoned",
+       m != NULL && m->payload[0] == '\0',
+       m ? (m->payload[0] ? m->payload : "(empty)") : "(never published)");
 
     printf("%s: %zu discovery messages inspected\n", fail ? "FAILED" : "ha_disco", g_n);
     return fail ? 1 : 0;
