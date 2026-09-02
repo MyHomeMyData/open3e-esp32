@@ -546,6 +546,15 @@
     <pre class="mono" id="dbg-out">–</pre>
   </div>
   <div class="card">
+    <h2>Datenpunkt schreiben</h2>
+    <p class="hint">Geschrieben wird auf <b id="dbg-target">–</b>, also auf die
+      ECU und die DID aus der Karte darüber. Der Wert muss die gleiche
+      JSON-Struktur haben, die das Lesen liefert — erst lesen, dann anpassen.</p>
+    <label><span>Wert (JSON)</span><input type="text" id="dbg-value" class="mono" placeholder='{"Setpoint": 52.0}'></label>
+    <button class="btn danger" id="dbg-write">Schreiben</button>
+    <p class="small muted" id="dbg-wstate" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card">
     <h2>Weboberfläche aktualisieren</h2>
     <p class="hint">Die Oberfläche liegt auf der Storage-Partition, nicht in der
       Firmware. Einzelne Dateien lassen sich hier direkt ersetzen — der schnelle
@@ -601,14 +610,6 @@
     <p class="small muted" id="ota-part" style="margin:10px 0 0"></p>
   </div>
 
-  <div class="card">
-    <h2>Datenpunkt schreiben</h2>
-    <p class="hint">Der Wert muss die gleiche JSON-Struktur haben, die das Lesen
-      liefert. Erst lesen, dann anpassen.</p>
-    <label><span>Wert (JSON)</span><input type="text" id="dbg-value" class="mono" placeholder='{"Setpoint": 52.0}'></label>
-    <button class="btn danger" id="dbg-write">Schreiben</button>
-    <p class="small muted" id="dbg-wstate" style="margin:10px 0 0"></p>
-  </div>
 </section>
 
 </main>

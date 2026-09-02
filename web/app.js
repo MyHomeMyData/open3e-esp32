@@ -358,6 +358,7 @@ async function loadSystem() {
     }
     if (prev) sel.value = prev;
   }
+  showTarget();
   renderPoints();
 }
 
@@ -835,6 +836,10 @@ function onlyChanges(rows) {
   }
   return out;
 }
+
+/* Set once the debug tab is wired; called again whenever the ECU list is
+   refilled, which happens after this runs. */
+let showTarget = () => {};
 
 function renderTrace() {
   const onlyWrites = $("tr-writes").checked;
@@ -1411,6 +1416,21 @@ function initApp() {
       $("dbg-out").textContent = e.message;
     }
   };
+  /* The write card has no fields of its own -- it acts on the ECU and DID
+     above it. Showing the target removes the one guess that matters here:
+     writing the right value to the wrong datapoint is not a typo you notice. */
+  showTarget = () => {
+    const did = Number($("dbg-did").value);
+    const name = didNames[did];
+    $("dbg-target").textContent = $("dbg-ecu").value
+      ? `ECU 0x${Number($("dbg-ecu").value).toString(16).toUpperCase()}, DID ${did}`
+        + (name ? ` (${name})` : "")
+      : "–";
+  };
+  $("dbg-did").oninput = showTarget;
+  $("dbg-ecu").onchange = showTarget;
+  showTarget();
+
   $("dbg-write").onclick = async () => {
     let value;
     try { value = JSON.parse($("dbg-value").value); }
