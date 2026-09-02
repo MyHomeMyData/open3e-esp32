@@ -144,6 +144,154 @@ static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     o3e_buf_free(&b);
 }
 
+/* A writable datapoint also gets something to operate it.
+ *
+ * The command goes to the gateway's open3e-compatible command topic, which
+ * takes an object of DID to value. Only one field of that value is set here --
+ * a select can send a ventilation stage and nothing else -- and the firmware
+ * fills the rest in from the datapoint's current reading before encoding.
+ * Without that merge, encoding would fail on the first field the control does
+ * not mention, including ones the database only knows as "Unknown1".
+ *
+ * Limited to the first level: a control for a field nested two deep would have
+ * to send a nested object, and a half-specified sub-structure is more likely a
+ * mistake than an intention.
+ */
+static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
+                            const char *state_topic, const char *object_id,
+                            const char *name, const o3e_node_t *leaf,
+                            const char *value_template,
+                            uint16_t ecu, uint16_t did, const char *path,
+                            bool writable, bool clear)
+{
+    if (!writable || !cfg->cmnd_topic[0]) {
+        return;
+    }
+    /* path is "" for a scalar datapoint and "_Field" one level down. Anything
+     * with a second separator is nested deeper than a control can address. */
+    const char *field = path[0] ? path + 1 : NULL;
+    if (field && strchr(field, '_')) {
+        return;
+    }
+
+    const char *component = NULL;
+    if (leaf->kind == O3E_K_ENUM && leaf->list_name) {
+        component = "select";
+    } else if (leaf->kind == O3E_K_INT || leaf->kind == O3E_K_BYTEVAL) {
+        /* Only these two: their byte width bounds the value, so the control
+         * can offer the range the datapoint actually accepts. A float has no
+         * such bound, and text, raw bytes and timestamps have no sensible
+         * control at all. */
+        component = "number";
+    } else {
+        return;
+    }
+
+    char topic[352];
+    snprintf(topic, sizeof(topic), "%s/%s/%s/%s_set/config",
+             cfg->ha_prefix, component, dev_id, object_id);
+    if (clear) {
+        mqtt_pub_raw(topic, "", true);
+        return;
+    }
+
+    /* The value the command carries: a name for a select, a number otherwise.
+     * The encoder resolves an enum by its text, which is exactly the option
+     * Home Assistant sends back. */
+    char cmd[320];
+    if (field) {
+        snprintf(cmd, sizeof(cmd),
+                 "{\"mode\": \"write\", \"addr\": \"0x%03X\", \"data\": "
+                 "{\"%u\": {\"%s\": %s}}}",
+                 ecu, did, field,
+                 component[0] == 's' ? "\"{{ value }}\"" : "{{ value }}");
+    } else {
+        snprintf(cmd, sizeof(cmd),
+                 "{\"mode\": \"write\", \"addr\": \"0x%03X\", \"data\": "
+                 "{\"%u\": %s}}",
+                 ecu, did,
+                 component[0] == 's' ? "\"{{ value }}\"" : "{{ value }}");
+    }
+
+    o3e_buf_t b;
+    o3e_buf_init(&b);
+    o3e_buf_adds(&b, "{\"name\": ");
+    o3e_buf_add_json_str(&b, name);
+    o3e_buf_adds(&b, ", \"state_topic\": ");
+    o3e_buf_add_json_str(&b, state_topic);
+    if (value_template) {
+        o3e_buf_adds(&b, ", \"value_template\": ");
+        o3e_buf_add_json_str(&b, value_template);
+    }
+    o3e_buf_adds(&b, ", \"command_topic\": ");
+    o3e_buf_add_json_str(&b, cfg->cmnd_topic);
+    o3e_buf_adds(&b, ", \"command_template\": ");
+    o3e_buf_add_json_str(&b, cmd);
+
+    char uid[176];
+    snprintf(uid, sizeof(uid), "%s_%s_set", dev_id, object_id);
+    o3e_buf_adds(&b, ", \"unique_id\": ");
+    o3e_buf_add_json_str(&b, uid);
+
+    if (component[0] == 's') {
+        o3e_buf_adds(&b, ", \"options\": [");
+        size_t count = o3e_db_enum_count(leaf->list_name);
+        for (size_t i = 0, written = 0; i < count; i++) {
+            int32_t val;
+            const char *text = NULL;
+            if (!o3e_db_enum_at(leaf->list_name, i, &val, &text) || !text) {
+                continue;
+            }
+            if (written++) {
+                o3e_buf_adds(&b, ", ");
+            }
+            o3e_buf_add_json_str(&b, text);
+        }
+        o3e_buf_adds(&b, "]");
+    } else {
+        /* Bounds from the field's own width and sign. Home Assistant defaults
+         * a number to 0..100, which would silently forbid most of the range a
+         * datapoint actually accepts. */
+        double lo, hi;
+        double span = 1.0;
+        for (uint16_t i = 0; i < leaf->len && i < 4; i++) {
+            span *= 256.0;
+        }
+        if (leaf->signd) {
+            hi = span / 2.0 - 1.0;
+            lo = -span / 2.0;
+        } else {
+            hi = span - 1.0;
+            lo = 0.0;
+        }
+        double scale = leaf->scale > 0.0 ? leaf->scale : 1.0;
+        char nums[128];
+        snprintf(nums, sizeof(nums),
+                 ", \"min\": %.4g, \"max\": %.4g, \"step\": %.4g, \"mode\": \"box\"",
+                 lo / scale, hi / scale, 1.0 / scale);
+        o3e_buf_adds(&b, nums);
+        if (leaf->unit && leaf->unit[0]) {
+            o3e_buf_adds(&b, ", \"unit_of_measurement\": ");
+            o3e_buf_add_json_str(&b, leaf->unit);
+        }
+    }
+
+    char lwt[CFG_TOPIC_MAX + 8];
+    snprintf(lwt, sizeof(lwt), "%s/LWT", cfg->base_topic);
+    o3e_buf_adds(&b, ", \"availability_topic\": ");
+    o3e_buf_add_json_str(&b, lwt);
+    o3e_buf_adds(&b, ", \"payload_available\": \"online\""
+                     ", \"payload_not_available\": \"offline\"");
+    o3e_buf_adds(&b, ", \"device\": {\"identifiers\": [");
+    o3e_buf_add_json_str(&b, dev_id);
+    o3e_buf_adds(&b, "]}}");
+
+    if (!b.oom && b.buf) {
+        mqtt_pub_raw(topic, b.buf, true);
+    }
+    o3e_buf_free(&b);
+}
+
 /* Walk the codec tree and announce every scalar leaf, since that is what
  * actually reaches a topic. A complex datapoint like FlowTemperatureSensor
  * therefore becomes Actual/Minimum/Maximum/Average entities rather than one
@@ -152,7 +300,7 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
                         const char *state_topic, const o3e_node_t *n,
                         const char *did_name, uint16_t did, uint16_t ecu,
                         char *path, size_t path_sz, char *tmpl, size_t tmpl_sz,
-                        bool flat, bool clear, int depth)
+                        bool flat, bool writable, bool clear, int depth)
 {
     if (depth > 4) {
         return;   /* deeply nested lists are not useful as entities */
@@ -171,7 +319,8 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
             snprintf(path + plen, path_sz - plen, "_%s", k->id ? k->id : "");
             snprintf(tmpl + tlen, tmpl_sz - tlen, ".%s", k->id ? k->id : "");
             walk_leaves(cfg, dev_id, state_topic, k, did_name, did, ecu,
-                        path, path_sz, tmpl, tmpl_sz, flat, clear, depth + 1);
+                        path, path_sz, tmpl, tmpl_sz, flat, writable,
+                        clear, depth + 1);
             path[plen] = '\0';
             tmpl[tlen] = '\0';
         }
@@ -193,9 +342,16 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
             }
         }
 
+        /* An enum leaf decodes to {"ID": n, "Text": "..."}, so it is not a
+           scalar on the wire: flat mode gives it two topics and JSON mode a
+           nested object. The Text is the half a person wants, and it is also
+           what the encoder accepts back, so both the sensor and the control
+           point at it. */
+        bool is_enum = (n->kind == O3E_K_ENUM);
+
         if (flat) {
             /* Flat mode gives each leaf its own topic; path segments are
-             * separated by '/' there rather than '_'. */
+               separated by '/' there rather than '_'. */
             char leaf_topic[384];
             char sub[192];
             snprintf(sub, sizeof(sub), "%s", path);
@@ -204,13 +360,19 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
                     *p = '/';
                 }
             }
-            snprintf(leaf_topic, sizeof(leaf_topic), "%s%s", state_topic, sub);
+            snprintf(leaf_topic, sizeof(leaf_topic), "%s%s%s", state_topic, sub,
+                     is_enum ? "/Text" : "");
             publish_entity(cfg, dev_id, leaf_topic, object_id, name, n, NULL, clear);
+            publish_control(cfg, dev_id, leaf_topic, object_id, name, n, NULL,
+                            ecu, did, path, writable, clear);
         } else {
             char t[256];
-            snprintf(t, sizeof(t), "{{ value_json%s }}", tmpl);
-            publish_entity(cfg, dev_id, state_topic, object_id, name, n,
-                           tmpl[0] ? t : "{{ value }}", clear);
+            snprintf(t, sizeof(t), "{{ value_json%s%s }}", tmpl,
+                     is_enum ? ".Text" : "");
+            const char *vt = (tmpl[0] || is_enum) ? t : "{{ value }}";
+            publish_entity(cfg, dev_id, state_topic, object_id, name, n, vt, clear);
+            publish_control(cfg, dev_id, state_topic, object_id, name, n, vt,
+                            ecu, did, path, writable, clear);
         }
         return;
     }
@@ -273,9 +435,15 @@ static void ha_disco_walk_selection(bool clear)
 
         char path[192] = "";
         char tmpl[192] = "";
+        /* The datapoint's own access flag decides whether its leaves get a
+           control. Sub-fields rarely carry one of their own, so taking it from
+           the root is both what the database means and what poller_write_now
+           checks before it writes. */
+        bool writable = (node->acc == O3E_ACC_RW);
         walk_leaves(&cfg, dev_id, state_topic, node,
                     node->id ? node->id : "datapoint", did, ecu,
-                    path, sizeof(path), tmpl, sizeof(tmpl), flat, clear, 0);
+                    path, sizeof(path), tmpl, sizeof(tmpl), flat, writable,
+                    clear, 0);
         o3e_codec_free(node);
         count++;
     }

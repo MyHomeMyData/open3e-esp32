@@ -322,6 +322,37 @@ char *poller_read_now(uint16_t ecu, uint16_t did, char *err, size_t err_sz)
     return out;
 }
 
+/* Add the fields `want` does not mention, taken from the datapoint as it reads
+ * right now. Only the top level is merged: a nested object given by the caller
+ * is taken as complete, because a half-specified sub-structure is more likely a
+ * mistake than an intention. */
+static bool merge_current(const o3e_node_t *node, const uint8_t *raw, size_t n,
+                          cJSON *want, char *err, size_t err_sz)
+{
+    if (!cJSON_IsObject(want)) {
+        return true;   /* a scalar datapoint has nothing to merge */
+    }
+    char *now = o3e_codec_decode_json(node, raw, n);
+    if (!now) {
+        snprintf(err, err_sz, "cannot read the datapoint's current value");
+        return false;
+    }
+    cJSON *cur = cJSON_Parse(now);
+    free(now);
+    if (!cur) {
+        snprintf(err, err_sz, "the datapoint's current value is not readable");
+        return false;
+    }
+    cJSON *it = NULL;
+    cJSON_ArrayForEach(it, cur) {
+        if (it->string && !cJSON_GetObjectItemCaseSensitive(want, it->string)) {
+            cJSON_AddItemToObject(want, it->string, cJSON_Duplicate(it, true));
+        }
+    }
+    cJSON_Delete(cur);
+    return true;
+}
+
 bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
                       char *err, size_t err_sz)
 {
@@ -341,8 +372,8 @@ bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
     }
     size_t n = 0;
     uds_result_t rr = can_read_did(ecu, did, buf, ISOTP_MAX_PAYLOAD, &n, UDS_P2_MS);
-    free(buf);
     if (rr.err != UDS_OK) {
+        free(buf);
         snprintf(err, err_sz, "cannot read the datapoint first: %s", uds_strerror(rr));
         return false;
     }
@@ -353,6 +384,7 @@ bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
     if (!node) {
         /* No raw fallback on the write path: sending bytes whose meaning we do
          * not know to a heat pump is exactly the mistake worth preventing. */
+        free(buf);
         snprintf(err, err_sz, "DID %u is not in the open3e database, so its "
                  "fields are unknown and it cannot be written", did);
         return false;
@@ -363,6 +395,7 @@ bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
         snprintf(err, err_sz, "%s is read-only in the open3e database",
                  node->id ? node->id : "this datapoint");
         o3e_codec_free(node);
+        free(buf);
         return false;
     }
 
@@ -370,8 +403,25 @@ bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
     if (!value) {
         snprintf(err, err_sz, "value is not valid JSON");
         o3e_codec_free(node);
+        free(buf);
         return false;
     }
+
+    /* Fill in whatever the caller left out from the datapoint's current value.
+     *
+     * Encoding a complex type needs every field, so without this a caller has
+     * to restate fields it does not care about -- including ones the database
+     * only knows as "Unknown1". That makes a single-value control impossible:
+     * a Home Assistant select can send the ventilation stage and nothing else.
+     * The read above already happened to pick the codec variant, so merging
+     * costs no extra traffic. */
+    if (!merge_current(node, buf, n, value, err, err_sz)) {
+        cJSON_Delete(value);
+        o3e_codec_free(node);
+        free(buf);
+        return false;
+    }
+    free(buf);
 
     uint8_t payload[UDS_MAX_WRITE];
     bool ok = o3e_codec_encode(node, value, payload, sizeof(payload), err, err_sz);
