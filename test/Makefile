@@ -6,14 +6,20 @@ LDLIBS  := -lcjson -lm
 SRC     := ../main/o3e_json.c ../main/o3e_db.c ../main/o3e_codec.c
 FLAT    := ../main/o3e_flatten.c
 
-.PHONY: all clean codec encode flatten isotp uds em380 collect sanitize
-all: codec encode flatten em380 isotp uds collect
+.PHONY: all clean codec encode flatten isotp uds em380 collect hadisco sanitize
+all: codec encode flatten em380 isotp uds collect hadisco
 
 build:
 	@mkdir -p build
 
 build/test_codec: build test_codec.c $(SRC)
 	$(CC) $(CFLAGS) -o $@ test_codec.c $(SRC) $(LDLIBS)
+
+build/test_hadisco: build test_hadisco.c ../main/ha_disco.c $(SRC)
+	$(CC) $(CFLAGS) -I stubs -I ../main -o $@ test_hadisco.c ../main/ha_disco.c $(SRC) $(LDLIBS)
+
+hadisco: build/test_hadisco
+	cd .. && test/build/test_hadisco data/o3edb.bin
 
 build/test_collect: build test_collect.c ../main/collect_parse.c
 	$(CC) $(CFLAGS) -o $@ test_collect.c ../main/collect_parse.c

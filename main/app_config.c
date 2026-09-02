@@ -181,6 +181,14 @@ void mqtt_cfg_get(mqtt_cfg_t *out)
     nvs_get_str_or(h, "mq_fmt", out->format, sizeof(out->format), MQTT_DEFAULTS.format);
     nvs_get_str_or(h, "mq_cmnd", out->cmnd_topic, sizeof(out->cmnd_topic),
                    MQTT_DEFAULTS.cmnd_topic);
+    /* A default only covers a missing key, not a key holding "". A stored
+     * empty value would otherwise stay empty forever, and it disables both the
+     * command listener and every Home Assistant control -- so heal it on the
+     * way out rather than waiting for someone to save the settings again. */
+    if (!out->cmnd_topic[0]) {
+        snprintf(out->cmnd_topic, sizeof(out->cmnd_topic), "%s/cmnd",
+                 out->base_topic[0] ? out->base_topic : "open3e");
+    }
     nvs_get_str_or(h, "ha_prefix", out->ha_prefix, sizeof(out->ha_prefix),
                    MQTT_DEFAULTS.ha_prefix);
     out->enabled = nvs_get_u8_or(h, "mq_on", 0) != 0;
