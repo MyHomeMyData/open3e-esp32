@@ -157,6 +157,8 @@ static esp_err_t h_status(httpd_req_t *r)
     net_prov_status(&net);
     can_port_stats(&can);
     mqtt_pub_stats(&mq);
+    int ha_sensors = 0, ha_controls = 0;
+    ha_disco_counts(&ha_sensors, &ha_controls);
     poller_stats(&poll);
     e3_scan_status(&scan);
     sys_cfg_get(&sys);
@@ -234,9 +236,10 @@ static esp_err_t h_status(httpd_req_t *r)
     o3e_buf_adds(&b, t);
 
     snprintf(t, sizeof(t),
-             "\"mqtt\": {\"connected\": %s, \"published\": %u, \"errors\": %u}, ",
+             "\"mqtt\": {\"connected\": %s, \"published\": %u, \"errors\": %u, "
+             "\"haSensors\": %d, \"haControls\": %d}, ",
              mq.connected ? "true" : "false", (unsigned)mq.published,
-             (unsigned)mq.errors);
+             (unsigned)mq.errors, ha_sensors, ha_controls);
     o3e_buf_adds(&b, t);
 
     snprintf(t, sizeof(t),

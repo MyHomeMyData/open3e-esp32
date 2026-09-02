@@ -49,6 +49,12 @@ static void device_id(char *out, size_t out_sz)
 /* One config topic per published scalar. In JSON mode a value_template picks
  * the field out of the payload; in flat mode the field already has its own
  * topic and no template is needed. */
+/* What the last walk actually put on the broker. Kept apart because
+ "published for 19 datapoints" says nothing about whether any of them
+ became operable, and a control that never appears looks exactly like a
+ datapoint that is read-only. */
+static int n_sensors, n_controls;
+
 /* Home Assistant keeps long-term statistics, and admits a sensor to the energy
  * dashboard, only when the state class suits the device class. An energy
  * reading marked `measurement` is rejected outright -- that is what an entity
@@ -85,6 +91,7 @@ static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
          * gone. It has to target the exact same topic the entity was published
          * on, which is why removal walks the codec tree too. */
         mqtt_pub_raw(topic, "", true);
+        n_sensors++;
         return;
     }
 
@@ -140,6 +147,7 @@ static void publish_entity(const mqtt_cfg_t *cfg, const char *dev_id,
 
     if (!b.oom && b.buf) {
         mqtt_pub_raw(topic, b.buf, true);
+        n_sensors++;
     }
     o3e_buf_free(&b);
 }
@@ -288,6 +296,7 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
 
     if (!b.oom && b.buf) {
         mqtt_pub_raw(topic, b.buf, true);
+        n_controls++;
     }
     o3e_buf_free(&b);
 }
@@ -399,6 +408,7 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
  * removal from targeting topics publishing never created. */
 static void ha_disco_walk_selection(bool clear)
 {
+    n_sensors = n_controls = 0;
     mqtt_cfg_t cfg;
     mqtt_cfg_get(&cfg);
     if (!cfg.enabled || !mqtt_pub_connected()) {
@@ -463,7 +473,23 @@ static void ha_disco_walk_selection(bool clear)
         count++;
     }
     cJSON_Delete(root);
-    ESP_LOGI(TAG, "discovery %s for %d datapoints", clear ? "cleared" : "published", count);
+    /* Counted separately: "published for 19 datapoints" says nothing about
+     * whether any of them became operable, and a control that never appears
+     * looks exactly like a datapoint that is read-only. */
+    ESP_LOGI(TAG, "discovery %s: %d datapoints, %d sensors, %d controls%s",
+             clear ? "cleared" : "published", count, n_sensors, n_controls,
+             (!clear && n_controls == 0 && !cfg.cmnd_topic[0])
+                 ? " (no command topic configured)" : "");
+}
+
+void ha_disco_counts(int *sensors, int *controls)
+{
+    if (sensors) {
+        *sensors = n_sensors;
+    }
+    if (controls) {
+        *controls = n_controls;
+    }
 }
 
 void ha_disco_publish_all(void) { ha_disco_walk_selection(false); }

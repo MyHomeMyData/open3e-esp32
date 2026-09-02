@@ -149,6 +149,11 @@ function renderStatus(s) {
 
   $("s-mqtt").textContent = s.mqtt.connected ? "verbunden" : "getrennt";
   $("s-pub").textContent = s.mqtt.published;
+  /* Sensors and controls apart: a datapoint that is read-only and one whose
+     control never got published look identical from the outside. */
+  $("s-ha").textContent = s.mqtt.haSensors + s.mqtt.haControls
+    ? `${s.mqtt.haSensors} Sensoren, ${s.mqtt.haControls} Bedienelemente`
+    : "nichts veröffentlicht";
   $("s-points").textContent = s.poll.points;
   $("s-pollerr").textContent = s.poll.failures;
 

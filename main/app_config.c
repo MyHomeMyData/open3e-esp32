@@ -200,7 +200,19 @@ bool mqtt_cfg_set(const mqtt_cfg_t *in)
     nvs_set_str(h, "mq_pass", in->pass);
     nvs_set_str(h, "mq_base", in->base_topic[0] ? in->base_topic : "open3e");
     nvs_set_str(h, "mq_fmt", in->format[0] ? in->format : "{didName}");
-    nvs_set_str(h, "mq_cmnd", in->cmnd_topic);
+    /* Every other string here falls back when left blank; this one did not,
+     * and an empty command topic disables both the command listener and every
+     * Home Assistant control -- silently, because nothing publishes an error
+     * for a feature that simply never appears. Derived from the base topic so
+     * two gateways on one broker do not share a channel. */
+    char cmnd[CFG_TOPIC_MAX + 8];
+    if (in->cmnd_topic[0]) {
+        snprintf(cmnd, sizeof(cmnd), "%s", in->cmnd_topic);
+    } else {
+        snprintf(cmnd, sizeof(cmnd), "%s/cmnd",
+                 in->base_topic[0] ? in->base_topic : "open3e");
+    }
+    nvs_set_str(h, "mq_cmnd", cmnd);
     nvs_set_str(h, "ha_prefix", in->ha_prefix[0] ? in->ha_prefix : "homeassistant");
     nvs_set_u8(h, "mq_on", in->enabled ? 1 : 0);
     nvs_set_u8(h, "ha_on", in->ha_discovery ? 1 : 0);
