@@ -292,46 +292,13 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
     o3e_buf_free(&b);
 }
 
-/* Walk the codec tree and announce every scalar leaf, since that is what
- * actually reaches a topic. A complex datapoint like FlowTemperatureSensor
- * therefore becomes Actual/Minimum/Maximum/Average entities rather than one
- * opaque one. */
-static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
-                        const char *state_topic, const o3e_node_t *n,
-                        const char *did_name, uint16_t did, uint16_t ecu,
-                        char *path, size_t path_sz, char *tmpl, size_t tmpl_sz,
-                        bool flat, bool writable, bool clear, int depth)
+/* Announce one scalar leaf: a sensor, and a control if it can be written. */
+static void publish_leaf(const mqtt_cfg_t *cfg, const char *dev_id,
+                         const char *state_topic, const o3e_node_t *n,
+                         const char *did_name, uint16_t did, uint16_t ecu,
+                         const char *path, const char *tmpl,
+                         bool flat, bool writable, bool clear)
 {
-    if (depth > 4) {
-        return;   /* deeply nested lists are not useful as entities */
-    }
-
-    switch (n->kind) {
-    case O3E_K_COMPLEX:
-    case O3E_K_SWITCH:
-        for (uint16_t i = 0; i < n->n_kids; i++) {
-            const o3e_node_t *k = n->kids[i];
-            if (k->kind == O3E_K_LIST || k->kind == O3E_K_ARRAY) {
-                continue;   /* variable-length; not a sensible fixed entity */
-            }
-            size_t plen = strlen(path);
-            size_t tlen = strlen(tmpl);
-            snprintf(path + plen, path_sz - plen, "_%s", k->id ? k->id : "");
-            snprintf(tmpl + tlen, tmpl_sz - tlen, ".%s", k->id ? k->id : "");
-            walk_leaves(cfg, dev_id, state_topic, k, did_name, did, ecu,
-                        path, path_sz, tmpl, tmpl_sz, flat, writable,
-                        clear, depth + 1);
-            path[plen] = '\0';
-            tmpl[tlen] = '\0';
-        }
-        return;
-
-    case O3E_K_LIST:
-    case O3E_K_ARRAY:
-    case O3E_K_UNKNOWN:
-        return;
-
-    default: {
         char object_id[192];
         snprintf(object_id, sizeof(object_id), "%03x_%u%s", ecu, did, path);
         char name[192];
@@ -374,8 +341,56 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
             publish_control(cfg, dev_id, state_topic, object_id, name, n, vt,
                             ecu, did, path, writable, clear);
         }
-        return;
+}
+
+/* Walk the codec tree and announce every scalar leaf, since that is what
+ * actually reaches a topic. A complex datapoint like FlowTemperatureSensor
+ * therefore becomes Actual/Minimum/Maximum/Average entities rather than one
+ * opaque one. */
+static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
+                        const char *state_topic, const o3e_node_t *n,
+                        const char *did_name, uint16_t did, uint16_t ecu,
+                        char *path, size_t path_sz, char *tmpl, size_t tmpl_sz,
+                        bool flat, bool writable, bool clear, int depth)
+{
+    if (depth > 4) {
+        return;   /* deeply nested lists are not useful as entities */
     }
+
+    switch (n->kind) {
+    case O3E_K_COMPLEX:
+    case O3E_K_SWITCH:
+        for (uint16_t i = 0; i < n->n_kids; i++) {
+            const o3e_node_t *k = n->kids[i];
+            if (k->kind == O3E_K_LIST || k->kind == O3E_K_ARRAY) {
+                continue;   /* variable-length; not a sensible fixed entity */
+            }
+            size_t plen = strlen(path);
+            size_t tlen = strlen(tmpl);
+            snprintf(path + plen, path_sz - plen, "_%s", k->id ? k->id : "");
+            snprintf(tmpl + tlen, tmpl_sz - tlen, ".%s", k->id ? k->id : "");
+            walk_leaves(cfg, dev_id, state_topic, k, did_name, did, ecu,
+                        path, path_sz, tmpl, tmpl_sz, flat, writable,
+                        clear, depth + 1);
+            path[plen] = '\0';
+            tmpl[tlen] = '\0';
+        }
+        return;
+
+    case O3E_K_LIST:
+    case O3E_K_ARRAY:
+    case O3E_K_UNKNOWN:
+        return;
+
+    default:
+        /* Not inlined: walk_leaves recurses, so every byte of frame it needs is
+         * paid once per level. The publishing buffers are over a kilobyte and
+         * are wanted only at the bottom, where nothing recurses further.
+         * Keeping them in their own frame is what stops this from overflowing
+         * the MQTT control task's stack. */
+        publish_leaf(cfg, dev_id, state_topic, n, did_name, did, ecu,
+                     path, tmpl, flat, writable, clear);
+        return;
     }
 }
 

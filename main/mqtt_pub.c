@@ -264,6 +264,16 @@ static void mqtt_ctl_task(void *arg)
              * readings were dropped while disconnected should not wait out a
              * whole interval. */
             ha_disco_publish_all();
+            /* This walk is the deepest thing this task does, and it grew a
+             * control entity per writable leaf. It overflowed a 4 KiB stack
+             * once, and the only symptom was that everything after it went
+             * missing -- so the margin is now reported rather than assumed. */
+            UBaseType_t left = uxTaskGetStackHighWaterMark(NULL);
+            if (left < 1024) {
+                ESP_LOGW(TAG, "control task stack down to %u bytes", (unsigned)left);
+            } else {
+                ESP_LOGD(TAG, "control task stack margin %u bytes", (unsigned)left);
+            }
             poller_refresh();
         }
         if (what & CTL_RESTART) {
@@ -277,7 +287,7 @@ static void mqtt_ctl_task(void *arg)
 static bool ctl_notify(uint32_t bits)
 {
     if (!ctl_task_h &&
-        xTaskCreate(mqtt_ctl_task, "mqttctl", 4096, NULL, 4, &ctl_task_h) != pdPASS) {
+        xTaskCreate(mqtt_ctl_task, "mqttctl", 8192, NULL, 4, &ctl_task_h) != pdPASS) {
         return false;
     }
     xTaskNotify(ctl_task_h, bits, eSetBits);
