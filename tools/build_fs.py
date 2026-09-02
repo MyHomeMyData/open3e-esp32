@@ -40,7 +40,11 @@ def build_tree(data_dir: Path, web_dir: Path, out_dir: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         raw = src.read_bytes()
         if src.suffix in GZIP_SUFFIXES and len(raw) >= MIN_GZIP_BYTES:
-            packed = gzip.compress(raw, 9)
+            # mtime=0: gzip stores the current time in its header by
+            # default, so two builds of identical sources would produce
+            # different bytes and there would be no way to tell a real change
+            # from the clock having moved.
+            packed = gzip.compress(raw, 9, mtime=0)
             dst.with_suffix(dst.suffix + ".gz").write_bytes(packed)
             print(f"  www/{rel!s:<16} {len(raw) / 1024:8.1f} KiB -> "
                   f"{len(packed) / 1024:.1f} KiB gzip")
