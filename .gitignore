@@ -1,0 +1,20 @@
+.cache/
+build/
+storage_image/
+storage_image.bin
+sdkconfig
+sdkconfig.old
+data/
+test/build/
+storage_image/
+storage_image.bin
+test/fixtures.json
+test/flat_fixtures.json
+test/encode_fixtures.json
+test/em_fixtures.json
+__pycache__/
+*.pyc
+.venv/
+
+# Pulled from dependencies.lock by idf.py; not ours to version.
+managed_components/

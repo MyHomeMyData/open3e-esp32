@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>open3e Gateway</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Setup mode replaces the whole interface: with no network there is nothing
+     to show, and a stripped page is what the captive portal pops up. -->
+<div id="setup" hidden>
+  <header><h1>open3e Gateway &mdash; Einrichtung</h1></header>
+  <main>
+    <div class="card">
+      <h2>WLAN verbinden</h2>
+      <p class="hint">Das Gerät startet nach dem Speichern neu und ist danach
+        unter <span class="mono" id="setup-host">open3e.local</span> erreichbar.</p>
+      <div class="row">
+        <label><span>Netzwerk</span>
+          <select id="setup-ssid"><option value="">Suche läuft…</option></select>
+        </label>
+        <button class="btn sec" id="setup-rescan" style="flex:0 0 auto">Erneut suchen</button>
+      </div>
+      <details>
+        <summary class="small muted" style="cursor:pointer;margin-bottom:10px">Netzwerk nicht in der Liste? Namen von Hand eingeben</summary>
+        <label><span>SSID (überschreibt die Auswahl oben)</span>
+          <input type="text" id="setup-ssid-manual" autocomplete="off" placeholder="z. B. FRITZ!Box 7590"></label>
+      </details>
+      <label><span>WLAN-Passwort</span><input type="password" id="setup-pass" autocomplete="off"></label>
+      <label><span>Gerätename (mDNS)</span><input type="text" id="setup-hostname" value="open3e"></label>
+      <details>
+        <summary class="small muted" style="cursor:pointer;margin-bottom:10px">Passwort dieses Einrichtungs-Hotspots ändern</summary>
+        <label><span>Mindestens 8 Zeichen. Leer lassen behält das bisherige.</span>
+          <input type="password" id="setup-appass" autocomplete="off"></label>
+      </details>
+      <button class="btn" id="setup-save">Speichern und neu starten</button>
+    </div>
+  </main>
+</div>
+
+<div id="app" hidden>
+<div id="db-warn" class="warnbox" hidden
+     style="margin:0;border-radius:0;border-left-width:5px"></div>
+<header>
+  <h1>open3e Gateway</h1>
+  <nav>
+    <button data-tab="status" class="active">Status</button>
+    <button data-tab="system">System</button>
+    <button data-tab="points">Datenpunkte</button>
+    <button data-tab="meter">Passive Daten</button>
+    <button data-tab="trace">CAN-Trace</button>
+    <button data-tab="settings">Einstellungen</button>
+    <button data-tab="debug">Debug</button>
+  </nav>
+  <span class="sp"></span>
+  <span id="hdr-can" class="pill">CAN</span>
+  <span id="hdr-mqtt" class="pill">MQTT</span>
+</header>
+
+<main>
+
+<section id="tab-status" class="active">
+  <div class="card">
+    <h2>Verbindung</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">WLAN</div><div class="v" id="s-ssid">–</div></div>
+      <div class="kv"><div class="k">IP-Adresse</div><div class="v mono" id="s-ip">–</div></div>
+      <div class="kv"><div class="k">Signal</div><div class="v" id="s-rssi">–</div></div>
+      <div class="kv"><div class="k">Laufzeit</div><div class="v" id="s-uptime">–</div></div>
+      <div class="kv"><div class="k">Uhrzeit</div><div class="v" id="s-clock">–</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>CAN-Bus</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">Zustand</div><div class="v" id="s-canstate">–</div></div>
+      <div class="kv"><div class="k">Busfehler</div><div class="v" id="s-buserr">–</div></div>
+      <div class="kv"><div class="k">Fehlerzähler TX / RX</div><div class="v" id="s-errcnt">–</div></div>
+      <div class="kv"><div class="k">Bus-Off-Recovery</div><div class="v" id="s-recov">–</div></div>
+      <div class="kv"><div class="k">Bus belegt von</div><div class="v" id="s-holder">–</div></div>
+    </div>
+    <p class="hint" style="margin:12px 0 0">250 kBit/s, TX GPIO15, RX GPIO16.
+      <b>TX-Fehlerzähler steigt, RX bleibt 0</b> heißt: gesendet, aber niemand
+      quittiert — auf CAN quittiert jeder andere aktive Knoten jedes Frame.</p>
+    <div class="warnbox" style="margin-top:12px">
+      <b>Busmasse an GND des Boards.</b> Die CAN-Klemme hat laut Schaltplan nur
+      CANH und CANL — die Masse gehört an den Minus der DC-Klemme. Zwischen
+      Logikmasse und CAN-Masse sitzt R31 (0 Ω), die Trennung ist also
+      überbrückt und die Board-Masse ist der Bezugspunkt. Fehlt er, driftet das
+      Gleichtaktpotential aus dem zulässigen Bereich des Transceivers; typisches
+      Bild ist dann ein steigender TX-Fehlerzähler bei RX = 0.
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="diag-run" style="flex:0 0 auto">Bus-Diagnose starten</button>
+      <span class="small muted" style="align-self:center">Dauert etwa 10 Sekunden.
+        Der Listen-Only-Teil sendet nichts und kann einen intakten Bus nicht stören.</span>
+    </div>
+    <div id="diag-out" hidden style="margin-top:14px"></div>
+  </div>
+  <div class="card">
+    <h2>MQTT und Abfrage</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">Broker</div><div class="v" id="s-mqtt">–</div></div>
+      <div class="kv"><div class="k">Gesendet</div><div class="v" id="s-pub">–</div></div>
+      <div class="kv"><div class="k">Aktive Datenpunkte</div><div class="v" id="s-points">–</div></div>
+      <div class="kv"><div class="k">Fehlgeschlagene Reads</div><div class="v" id="s-pollerr">–</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Auslastung</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">CPU gesamt</div><div class="v" id="s-cpu">–</div></div>
+      <div class="kv"><div class="k">Interner RAM frei</div><div class="v" id="s-ram">–</div></div>
+      <div class="kv"><div class="k">Minimum seit Start</div><div class="v" id="s-rammin">–</div></div>
+      <div class="kv"><div class="k">PSRAM frei</div><div class="v" id="s-psram">–</div></div>
+    </div>
+    <p class="hint" style="margin:12px 0 0">Der <b>interne RAM</b> ist der knappe:
+      die 8 MB PSRAM lassen eine Gesamtsumme beruhigend aussehen, während der Teil
+      ausgeht, auf den Netzwerkstack und Interrupts angewiesen sind. Die Spalte
+      <b>Stack frei</b> zeigt, wie nah eine Task ihrem Stack-Ende je gekommen ist —
+      geht sie gegen Null, stürzt sie irgendwann ab.</p>
+    <div class="tablewrap" style="margin-top:12px">
+      <table id="task-table">
+        <thead><tr>
+          <th>Task</th><th class="num">CPU</th><th class="num">Stack frei</th>
+          <th class="num">Prio</th><th>Core</th><th>Status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="small muted" id="s-window" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>Gerät</h2>
+    <div class="grid">
+      <div class="kv"><div class="k">Firmware gebaut</div><div class="v" id="s-built">–</div></div>
+      <div class="kv"><div class="k">Build-Kennung</div><div class="v mono" id="s-sha">–</div></div>
+      <div class="kv"><div class="k">Version</div><div class="v" id="s-fw">–</div></div>
+      <div class="kv"><div class="k">open3e-Datenbank</div><div class="v" id="s-db">–</div></div>
+    </div>
+    <p class="hint" style="margin:12px 0 0">Die <b>Build-Kennung</b> sind die ersten
+      acht Zeichen der ELF-Prüfsumme — sie ändert sich bei jedem geänderten Byte
+      Code. Zum Vergleichen lokal <span class="mono">make fwinfo</span> aufrufen:
+      stimmen die Kennungen überein, läuft genau dieser Build auf dem Gerät.</p>
+  </div>
+</section>
+
+<section id="tab-system">
+  <div class="card">
+    <h2>Bus-Scan</h2>
+    <p class="hint">Sucht ECUs auf den COB-IDs 0x680–0x6EF und liest anschließend
+      deren Datenpunkte. Solange ein Scan läuft, pausiert die zyklische Abfrage.</p>
+    <div class="row">
+      <label><span>Umfang</span>
+        <select id="scan-mode">
+          <option value="known">Schnellscan – nur bekannte Datenpunkte (ca. 1 Min. pro ECU)</option>
+          <option value="full">Vollscan – DID 256 bis 4000 (10–20 Min.)</option>
+        </select>
+      </label>
+      <button class="btn" id="scan-start" style="flex:0 0 auto">Scan starten</button>
+      <button class="btn sec" id="scan-abort" style="flex:0 0 auto" disabled>Abbrechen</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label style="flex:0 0 auto"><span>COB-ID von</span>
+        <input type="text" id="scan-lo" class="mono" value="0x680" style="width:100px"></label>
+      <label style="flex:0 0 auto"><span>bis</span>
+        <input type="text" id="scan-hi" class="mono" value="0x6EF" style="width:100px"></label>
+      <button class="btn sec" id="scan-wide" style="flex:0 0 auto">gesamter Bereich 0x000–0x7FF</button>
+      <span class="small muted" style="align-self:center">Der Standardbereich
+        stammt von open3e. Er ist zu eng: Steuerverkehr wurde auf
+        <span class="mono">0x441</span> gefunden. Der volle Bereich dauert für die
+        Gerätesuche rund 7 Minuten.</span>
+    </div>
+    <div id="scan-progress" hidden style="margin-top:14px">
+      <div class="bar"><i id="scan-bar" style="width:0"></i></div>
+      <p class="small muted" id="scan-msg" style="margin:6px 0 0"></p>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Gefundene Geräte</h2>
+    <p class="hint">Der <b>Name</b> ist frei wählbar und landet im Platzhalter
+      <span class="mono">{device}</span> der MQTT-Topics — genau wie der Schlüssel
+      in open3es <span class="mono">devices.json</span>. Alles andere liest das
+      Gerät selbst vom Bus (DID 256 und 377).</p>
+    <div id="ecu-list" class="muted small">Noch kein Scan durchgeführt.</div>
+    <p class="small muted" style="margin:12px 0 0">Ergänzend lohnt der Reiter
+      <b>CAN-Trace</b>: die ID-Übersicht dort zeigt <i>passiv</i>, welche
+      Kennungen auf dem Bus tatsächlich sprechen — ganz ohne zu fragen, und
+      unabhängig davon, ob ein Gerät auf Anfragen antwortet.</p>
+  </div>
+</section>
+
+<section id="tab-points">
+  <div class="card">
+    <h2>Datenpunkte auswählen</h2>
+    <p class="hint">Unter jedem Namen steht eine <b>deutsche Lesehilfe</b>, beim
+      Bauen aus einem Glossar erzeugt (99 % der Datenpunkte). Sie ist eine
+      Wort-für-Wort-Übersetzung, keine offizielle Bezeichnung — maßgeblich
+      bleibt der englische Name. Die Suche findet beides.<br><br>
+      Jeder aktivierte Datenpunkt wird im gewählten Intervall gelesen
+      und nach MQTT gesendet. <b>JSON</b> schickt das ganze Objekt auf ein Topic,
+      <b>geflacht</b> jedes Unterfeld auf ein eigenes.</p>
+    <div class="row">
+      <label><span>Gerät</span><select id="pt-ecu"></select></label>
+      <label><span>Suche</span><input type="text" id="pt-filter" placeholder="Name, deutsche Bezeichnung oder DID"></label>
+      <label style="flex:0 0 auto"><span>Anzeigen</span>
+        <span class="small" style="display:flex;gap:14px;white-space:nowrap;padding-top:6px">
+          <label style="margin:0"><input type="checkbox" id="pt-only-known" checked> nur bekannte</label>
+          <label style="margin:0"><input type="checkbox" id="pt-only-active"> nur aktive</label>
+        </span>
+      </label>
+      <button class="btn" id="pt-save" style="flex:0 0 auto">Auswahl speichern</button>
+    </div>
+    <p class="small muted" id="pt-scope" style="margin:4px 0 0"></p>
+  </div>
+  <div class="card">
+    <div class="tablewrap">
+      <table id="pt-table">
+        <thead><tr>
+          <th style="width:34px"></th>
+          <th class="num">DID</th>
+          <th>Name</th>
+          <th class="num">Intervall</th>
+          <th>Modus</th>
+          <th>Topic-Suffix</th>
+          <th style="width:34px" title="Home-Assistant-Discovery">HA</th>
+          <th>Aktueller Wert</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="small muted" id="pt-count" style="margin:12px 0 0"></p>
+    <button class="btn sec" id="pt-more" style="margin-top:10px" hidden>Weitere 300 anzeigen</button>
+  </div>
+</section>
+
+<section id="tab-meter">
+  <div class="card">
+    <h2>Broadcast-Kanal (Collect)</h2>
+    <p class="hint">E3-Geräte senden ihre eigenen Datenpunkte unaufgefordert auf
+      einer festen CAN-ID — die Vitocharge VX3 laut E3onCAN auf
+      <span class="mono">0x451</span>, die Vitocal auf <span class="mono">0x693</span>.
+      Das ist kein ISO-TP, sondern Viessmanns eigenes Format. Die übertragenen
+      Kennungen sind aber <b>normale open3e-DIDs</b> — sie werden hier also
+      benannt und dekodiert wie jeder andere Datenpunkt.</p>
+    <p class="hint">In einem echten Mitschnitt sendet die Vitocharge ihre
+      Betriebsdaten auf <span class="mono">0x451</span> und ihre
+      <b>Regelungsart</b> (DID 2239) alle 10 Sekunden separat auf
+      <span class="mono">0x441</span>. Deshalb sind mehrere Kanäle möglich —
+      jeder bekommt seinen eigenen Zusammenbau, sonst würden ihre Segmente
+      ineinanderlaufen.</p>
+    <div class="warnbox">
+      Welches Gerät auf einer ID sendet, sagen am Ende die Datenpunkte selbst:
+      Sind es <span class="mono">Grid…</span>-Werte, ist es ein Zähler; sind es
+      Lade- und Batteriewerte, die Vitocharge. Die Namensspalte unten beantwortet
+      das.
+    </div>
+    <div class="row">
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="co-on">
+          Broadcast-Kanal mitlesen</label>
+      </label>
+      <label style="flex:0 0 auto"><span>CAN-IDs (kommagetrennt)</span>
+        <input type="text" id="co-id" class="mono" value="0x451,0x441" style="width:180px"></label>
+      <button class="btn" id="co-save" style="flex:0 0 auto">Übernehmen</button>
+      <div class="kv" style="flex:0 0 auto"><div class="k">Nachrichten</div>
+        <div class="v" id="co-msgs">–</div></div>
+      <div class="kv" style="flex:0 0 auto"><div class="k">unvollständig</div>
+        <div class="v" id="co-bad">–</div></div>
+    </div>
+    <div class="tablewrap" style="margin-top:12px">
+      <table id="co-table">
+        <thead><tr>
+          <th style="width:34px"></th><th class="num">DID</th><th>Name</th>
+          <th class="num">Empfangen</th><th class="num">Intervall</th>
+          <th>Modus</th><th>Topic-Suffix</th><th>Aktueller Wert</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button class="btn" id="co-save-sel" style="margin-top:12px">Auswahl speichern</button>
+  </div>
+
+  <div class="card">
+    <h2>Viessmann E380 Energiezähler</h2>
+    <p class="hint">Der E380 beantwortet keine Anfragen — er sendet unaufgefordert
+      auf den CAN-IDs 0x250–0x25D. Das Gerät hört nur mit und schreibt nichts
+      auf den Bus. Gerade IDs gehören zum Zähler mit CAN-Adresse 97, ungerade zu 98.</p>
+    <div class="grid">
+      <div class="kv"><div class="k">Status</div><div class="v" id="em-state">–</div></div>
+      <div class="kv"><div class="k">Empfangene Frames</div><div class="v" id="em-frames">–</div></div>
+      <div class="kv"><div class="k">Gesendet</div><div class="v" id="em-pub">–</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Frames</h2>
+    <p class="hint">Das <b>Intervall</b> ist hier eine Untergrenze, kein Zeitplan:
+      gesendet wird nur, was auch empfangen wurde. Der Zähler sendet mehrmals pro
+      Sekunde — ohne Begrenzung liefe der Broker voll.</p>
+    <div class="tablewrap">
+      <table id="em-table">
+        <thead><tr>
+          <th style="width:34px"></th>
+          <th>CAN-ID</th><th>Adresse</th><th>Name</th>
+          <th class="num">Intervall</th><th>Modus</th><th>Topic-Suffix</th>
+          <th>Zuletzt empfangen</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="em-save" style="flex:0 0 auto">Auswahl speichern</button>
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="em-only-seen" checked>
+          nur empfangene Frames zeigen</label>
+      </label>
+    </div>
+    <p class="small muted" style="margin:8px 0 0">Von den 14 CAN-IDs gehört die
+      Hälfte zum Zähler mit Adresse 97, die andere zu 98 — es antwortet also
+      normalerweise nur eine davon.</p>
+  </div>
+</section>
+
+<section id="tab-trace">
+  <div class="card">
+    <h2>Mitschnitt</h2>
+    <p class="hint">Zeichnet <b>jedes</b> Frame auf dem Bus auf, auch den Verkehr
+      zwischen den Geräten untereinander — dort steht, wie ein Gerät ein anderes
+      kommandiert. Selbst gesendete Frames sind mit <span class="mono">TX</span>
+      markiert, damit ein Austausch in der richtigen Reihenfolge lesbar ist.</p>
+    <div class="row">
+      <label><span>Ringgröße (Frames)</span>
+        <input type="number" id="tr-frames" value="65536" min="1024" max="262144" step="1024"></label>
+      <label><span>CAN-ID von</span><input type="text" id="tr-lo" class="mono" value="0x000"></label>
+      <label><span>bis</span><input type="text" id="tr-hi" class="mono" value="0x7FF"></label>
+      <button class="btn" id="tr-start" style="flex:0 0 auto">Aufzeichnen</button>
+      <button class="btn sec" id="tr-stop" style="flex:0 0 auto" disabled>Stoppen</button>
+    </div>
+    <div class="warnbox" style="margin-top:12px">
+      <b>Wenn weder Zeitpunkt noch Kennung bekannt sind</b> — etwa bei einem
+      Gerät, das vom Viessmann-Backend gesteuert wird — nimm
+      <b>„Abweichung vom Normalzustand"</b>. Das Gerät lernt erst, welche
+      CAN-IDs auf diesem Bus vorkommen und welche Bytes sich dabei überhaupt
+      verändern. Danach löst es aus, sobald eine <b>neue ID</b> auftaucht oder
+      ein Byte kippt, das die ganze Lernphase über konstant war.
+      <br><br>
+      Das findet auch Kommandos, die gar keine UDS-Schreibzugriffe sind,
+      sondern nur ein geänderter Wert in einer zyklischen Nachricht. In jedem
+      Fall kommt eine MQTT-Nachricht auf <span class="mono">&lt;basis&gt;/trace</span>.
+    </div>
+    <div class="row">
+      <label style="flex:0 0 auto"><span>Auslöser</span>
+        <select id="tr-trigger" style="width:280px">
+          <option value="none">kein — bis Stoppen aufzeichnen</option>
+          <option value="write">beim ersten Schreibzugriff einfrieren</option>
+          <option value="novel" selected>Abweichung vom Normalzustand</option>
+          <option value="control">Steuerpunkt ändert sich (2188/2225/2226/2239)</option>
+        </select>
+      </label>
+      <label style="flex:0 0 auto"><span>Lernphase</span>
+        <input type="number" id="tr-learn" value="600" min="30" max="7200" step="30"
+               style="width:110px"></label>
+      <label style="flex:0 0 auto"><span>danach noch aufzeichnen</span>
+        <input type="number" id="tr-post" value="2000" min="0" max="60000" step="500"
+               style="width:120px"></label>
+      <span class="small muted" style="align-self:center">Frames — damit auch die
+        Antwort auf den Schreibzugriff im Mitschnitt landet.</span>
+    </div>
+    <div class="row">
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="tr-own" checked>
+          eigenen Verkehr verwerfen</label>
+      </label>
+      <span class="small muted" style="align-self:center">Lässt weg, was dieses
+        Gerät selbst anstößt — die eigenen Anfragen <i>und</i> die Antworten
+        darauf. Sonst besteht der Mitschnitt überwiegend aus dem eigenen
+        Abfragezyklus, und die Lernphase hält ihn für normalen Busverkehr.</span>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div class="kv"><div class="k">Status</div><div class="v" id="tr-state">–</div></div>
+      <div class="kv"><div class="k">Aufgezeichnet</div><div class="v" id="tr-count">–</div></div>
+      <div class="kv"><div class="k">Überschrieben</div><div class="v" id="tr-drop">–</div></div>
+      <div class="kv"><div class="k">Dauer</div><div class="v" id="tr-time">–</div></div>
+      <div class="kv"><div class="k">Rate / Reichweite</div><div class="v small" id="tr-span">–</div></div>
+      <div class="kv"><div class="k">Auslöser</div><div class="v" id="tr-trig-state">–</div></div>
+      <div class="kv"><div class="k">Eigene verworfen</div><div class="v" id="tr-own-skipped">–</div></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn sec" id="tr-load" style="flex:0 0 auto">Auswerten</button>
+      <button class="btn sec" id="tr-dl" style="flex:0 0 auto">Als candump herunterladen</button>
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="tr-writes">
+          nur Steuerbefehle</label>
+      </label>
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="tr-changes" checked>
+          nur Wertänderungen</label>
+      </label>
+    </div>
+    <p class="small muted" style="margin:10px 0 0">Der Download ist
+      <span class="mono">candump</span>-Format — lesbar für
+      <span class="mono">canplayer</span>, Wireshark und open3es
+      <span class="mono">candump2msgbus.py</span>.</p>
+  </div>
+  <div class="card">
+    <h2>ID-Übersicht</h2>
+    <p class="hint">Welche CAN-IDs dieser Bus führt, wie oft, und welche Bytes
+      sich überhaupt verändern. <b>Konstante Bytes</b> sind die interessanten:
+      kippt eines davon, ist etwas passiert. Diese Karte ist auch ohne Auslöser
+      nützlich — sie ist die Landkarte des Busses.</p>
+    <div class="row">
+      <button class="btn sec" id="tr-ids" style="flex:0 0 auto">ID-Übersicht laden</button>
+    </div>
+    <div class="tablewrap" style="margin-top:12px">
+      <table id="tr-idtable">
+        <thead><tr>
+          <th>CAN-ID</th><th class="num">Frames</th><th class="num">pro Sekunde</th>
+          <th>Bytes 0–7 (K = konstant)</th><th>zuletzt</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Erkannte UDS-Zugriffe</h2>
+    <p class="hint">Aus den Frames wieder zusammengesetzt. Der Bus wiederholt
+      dieselben Werte im Sekundentakt; <b>nur Wertänderungen</b> blendet die
+      Wiederholungen aus und zeigt je Datenpunkt nur die Momente, in denen sich
+      etwas bewegt hat — mit altem und neuem Wert. Hervorgehoben sind die
+      <b>Steuerbefehle</b>, die der Backend-Gateway in den Speicher schreibt.</p>
+    <div class="tablewrap">
+      <table id="tr-table">
+        <thead><tr>
+          <th class="num">Zeit</th><th>ECU</th><th>Richtung</th><th>Dienst</th>
+          <th class="num">DID</th><th>Name</th><th>Daten</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="small muted" id="tr-summary" style="margin:12px 0 0"></p>
+  </div>
+</section>
+
+<section id="tab-settings">
+  <div class="card">
+    <h2>MQTT</h2>
+    <label class="small"><input type="checkbox" id="mq-enabled"> MQTT aktivieren</label>
+    <div class="row">
+      <label><span>Broker</span><input type="text" id="mq-host" placeholder="192.168.1.10"></label>
+      <label style="flex:0 0 110px"><span>Port</span><input type="number" id="mq-port" value="1883"></label>
+    </div>
+    <div class="row">
+      <label><span>Benutzer</span><input type="text" id="mq-user" autocomplete="off"></label>
+      <label><span>Passwort</span><input type="password" id="mq-pass" autocomplete="off" placeholder="unverändert"></label>
+    </div>
+    <div class="row">
+      <label><span>Basis-Topic</span><input type="text" id="mq-base" value="open3e"></label>
+      <label><span>Formatstring</span><input type="text" id="mq-format" value="{didName}"></label>
+    </div>
+    <p class="small muted" style="margin:-4px 0 12px">
+      Platzhalter wie bei open3e: <span class="mono">{didName}</span>,
+      <span class="mono">{didNumber}</span>, <span class="mono">{ecuAddr}</span>,
+      <span class="mono">{device}</span>, auch <span class="mono">{ecuAddr:03X}</span>
+      und <span class="mono">{didNumber:04d}</span>.
+    </p>
+    <label><span>Kommando-Topic</span><input type="text" id="mq-cmnd" value="open3e/cmnd"></label>
+  </div>
+  <div class="card">
+    <h2>Home Assistant</h2>
+    <label class="small"><input type="checkbox" id="ha-on"> Auto-Discovery senden</label>
+    <label><span>Discovery-Prefix</span><input type="text" id="ha-prefix" value="homeassistant"></label>
+    <p class="hint" style="margin:0">Beim Abschalten werden die bereits gesendeten
+      Discovery-Topics gelöscht, damit keine verwaisten Entitäten zurückbleiben.</p>
+  </div>
+  <div class="card">
+    <h2>System</h2>
+    <div class="warnbox">
+      <b>Schreiben auf den CAN-Bus</b> ist standardmäßig deaktiviert. Schreibbar sind
+      ohnehin nur Datenpunkte, die die open3e-Datenbank als <span class="mono">rw</span>
+      führt. Falsche Werte können die Heizung in einen unerwünschten Zustand bringen.
+    </div>
+    <label class="small"><input type="checkbox" id="sys-write"> Schreiben freigeben</label>
+    <label class="small"><input type="checkbox" id="sys-em380"> E380-Energiezähler mitlesen (passiv)</label>
+    <p class="small muted" style="margin:-4px 0 12px">Standardmäßig aus. Ohne
+      angeschlossenen Zähler bringt es nichts und läuft nur im Empfangs-Interrupt mit.</p>
+    <label><span>Zeitzone (POSIX)</span><input type="text" id="sys-tz"></label>
+    <p class="small muted" style="margin:-4px 0 12px">Wird für die Zeit- und
+      Datums-Codecs gebraucht, die open3e in lokaler Zeit ausgibt.</p>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" id="set-save" style="flex:0 0 auto">Einstellungen speichern</button>
+      <button class="btn sec" id="dev-restart" style="flex:0 0 auto">Neu starten</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Sichern und wiederherstellen</h2>
+    <p class="hint">Die Sicherung enthält WLAN, MQTT, Systemeinstellungen, die
+      Datenpunkt-Auswahl und wahlweise das Scan-Ergebnis — alles, um ein Gerät
+      in denselben Zustand zu bringen.</p>
+    <div class="warnbox">
+      <b>Die Datei enthält Passwörter</b> (WLAN, MQTT, Hotspot). Ohne sie ließe
+      sich das Gerät nach dem Wiederherstellen nicht erreichen, deshalb sind sie
+      drin. Entsprechend aufbewahren.
+    </div>
+    <div class="row">
+      <label style="flex:0 0 auto"><span>&nbsp;</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="exp-scan" checked>
+          Scan-Ergebnis mitsichern</label>
+      </label>
+      <button class="btn" id="exp-run" style="flex:0 0 auto">Sicherung herunterladen</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label><span>Sicherung einspielen</span>
+        <input type="file" id="imp-file" accept=".json"></label>
+      <button class="btn danger" id="imp-run" style="flex:0 0 auto" disabled>Wiederherstellen</button>
+    </div>
+    <p class="small muted" id="imp-msg" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>Zurücksetzen</h2>
+    <p class="hint">Jeder Knopf löscht genau eine Sache. Das WLAN bleibt bei allen
+      erhalten — sonst wäre das Gerät nach dem Zurücksetzen nicht mehr erreichbar.</p>
+    <div class="row">
+      <button class="btn sec" data-reset="points" style="flex:0 0 auto">Datenpunkt-Auswahl</button>
+      <button class="btn sec" data-reset="scan" style="flex:0 0 auto">Scan-Ergebnis und Auswahl</button>
+      <button class="btn sec" data-reset="mqtt" style="flex:0 0 auto">MQTT-Einstellungen</button>
+      <button class="btn danger" data-reset="all" style="flex:0 0 auto">Alles außer WLAN</button>
+      <button class="btn danger" id="dev-forget" style="flex:0 0 auto">WLAN vergessen</button>
+    </div>
+  </div>
+</section>
+
+<section id="tab-debug">
+  <div class="card">
+    <h2>Datenpunkt lesen</h2>
+    <div class="row">
+      <label><span>ECU</span><select id="dbg-ecu"></select></label>
+      <label><span>DID</span><input type="number" id="dbg-did" value="268"></label>
+      <button class="btn" id="dbg-read" style="flex:0 0 auto">Lesen</button>
+    </div>
+    <pre class="mono" id="dbg-out">–</pre>
+  </div>
+  <div class="card">
+    <h2>Weboberfläche aktualisieren</h2>
+    <p class="hint">Die Oberfläche liegt auf der Storage-Partition, nicht in der
+      Firmware. Einzelne Dateien lassen sich hier direkt ersetzen — der schnelle
+      Weg, solange sich noch täglich etwas ändert.</p>
+    <div class="row">
+      <label><span>Dateien aus <span class="mono">storage_image/www/</span> (z. B. app.js.gz)</span>
+        <input type="file" id="fs-files" multiple></label>
+      <button class="btn" id="fs-upload" style="flex:0 0 auto" disabled>Hochladen</button>
+    </div>
+    <p class="small muted" id="fs-msg" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>Datenbank aktualisieren</h2>
+    <p class="hint">Ersetzt die gesamte Storage-Partition mit
+      <span class="mono">build/storage.bin</span> — nötig, wenn sich die
+      open3e-Datenpunktdatenbank geändert hat.</p>
+    <div class="warnbox">
+      Dabei gehen <b>Datenpunkt-Auswahl und Scan-Ergebnis verloren</b>, weil sie
+      auf derselben Partition liegen. Die WLAN- und MQTT-Einstellungen bleiben —
+      die stehen im NVS.
+    </div>
+    <div class="row">
+      <label><span>Storage-Abbild (storage.bin, 4 MB)</span>
+        <input type="file" id="st-file" accept=".bin"></label>
+      <button class="btn" id="st-upload" style="flex:0 0 auto" disabled>Hochladen und neu starten</button>
+    </div>
+    <div id="st-progress" hidden style="margin-top:14px">
+      <div class="bar"><i id="st-bar" style="width:0"></i></div>
+      <p class="small muted" id="st-msg" style="margin:6px 0 0"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Firmware-Update</h2>
+    <p class="hint">Lade <span class="mono">build/open3e-gateway.bin</span> hoch.
+      Das Abbild wird in die zweite App-Partition geschrieben; die laufende
+      Firmware bleibt bis zum Schluss unangetastet.</p>
+    <div class="warnbox" id="ota-rollback" hidden>
+      Diese Firmware läuft <b>auf Probe</b>. Bleibt das Gerät eine Minute lang
+      erreichbar, wird sie automatisch bestätigt. Sonst startet der Bootloader
+      beim nächsten Reset wieder die vorherige Version.
+    </div>
+    <div class="row">
+      <label><span>Firmware-Datei (.bin)</span>
+        <input type="file" id="ota-file" accept=".bin"></label>
+      <button class="btn" id="ota-start" style="flex:0 0 auto" disabled>Hochladen und neu starten</button>
+    </div>
+    <div id="ota-progress" hidden style="margin-top:14px">
+      <div class="bar"><i id="ota-bar" style="width:0"></i></div>
+      <p class="small muted" id="ota-msg" style="margin:6px 0 0"></p>
+    </div>
+    <p class="small muted" id="ota-part" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="card">
+    <h2>Datenpunkt schreiben</h2>
+    <p class="hint">Der Wert muss die gleiche JSON-Struktur haben, die das Lesen
+      liefert. Erst lesen, dann anpassen.</p>
+    <label><span>Wert (JSON)</span><input type="text" id="dbg-value" class="mono" placeholder='{"Setpoint": 52.0}'></label>
+    <button class="btn danger" id="dbg-write">Schreiben</button>
+    <p class="small muted" id="dbg-wstate" style="margin:10px 0 0"></p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

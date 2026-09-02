@@ -1,0 +1,40 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "app_config.c"
+        "can_port.c"
+        "collect.c"
+        "collect_parse.c"
+        "cantrace.c"
+        "e3_scan.c"
+        "em380.c"
+        "ha_disco.c"
+        "httpd_api.c"
+        "isotp.c"
+        "mqtt_cmnd.c"
+        "mqtt_pub.c"
+        "net_prov.c"
+        "o3e_codec.c"
+        "o3e_db.c"
+        "o3e_flatten.c"
+        "o3e_json.c"
+        "ota.c"
+        "poller.c"
+        "sysinfo.c"
+        "uds.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        esp_driver_twai
+        esp_event
+        esp_http_server
+        esp_netif
+        esp_timer
+        esp_wifi
+        nvs_flash
+        app_update
+    PRIV_REQUIRES
+        espressif__cjson
+        espressif__mqtt
+        joltwallet__littlefs
+        espressif__mdns
+)

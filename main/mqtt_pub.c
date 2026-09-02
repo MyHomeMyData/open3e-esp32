@@ -1,0 +1,297 @@
+#include "mqtt_pub.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "mqtt_client.h"
+
+#include "app_config.h"
+#include "ha_disco.h"
+#include "poller.h"
+#include "mqtt_cmnd.h"
+#include "o3e_flatten.h"
+#include "o3e_json.h"
+
+static const char *TAG = "mqtt";
+
+static void publish_leaf(void *user, const char *topic, const char *value);
+
+static esp_mqtt_client_handle_t client;
+static mqtt_stats_t stats;
+static char lwt_topic[CFG_TOPIC_MAX + 8];
+
+/* Restarting the client tears a task down and waits for it. Doing that inside
+ * the HTTP handler that just saved the settings makes the browser wait on it
+ * too, so any stall there looks like the device has died. The restart runs on
+ * a task of its own and the settings response goes out immediately. */
+static TaskHandle_t ctl_task_h;
+
+/* Work handed to the control task. Both items are too heavy for the contexts
+ * that request them: a restart tears down a task, and announcing walks the
+ * whole selection compiling codecs -- neither belongs in an HTTP handler or in
+ * the MQTT client's own event callback. */
+#define CTL_RESTART   (1u << 0)
+#define CTL_ANNOUNCE  (1u << 1)
+
+static bool ctl_notify(uint32_t bits);
+
+/* ------------------------------------------------------------------ */
+/* Topic formatting                                                     */
+
+/* open3e builds topics with Python's str.format(). Rather than a general
+ * format engine we recognise the placeholders its README documents; anything
+ * else is copied through so a typo is visible in the topic instead of being
+ * silently dropped. */
+static bool match_placeholder(const char *p, const char *name, size_t *adv,
+                              char *spec, size_t spec_sz)
+{
+    size_t nlen = strlen(name);
+    if (strncmp(p, name, nlen) != 0) {
+        return false;
+    }
+    const char *q = p + nlen;
+    spec[0] = '\0';
+    if (*q == ':') {
+        q++;
+        size_t i = 0;
+        while (*q && *q != '}' && i + 1 < spec_sz) {
+            spec[i++] = *q++;
+        }
+        spec[i] = '\0';
+    }
+    if (*q != '}') {
+        return false;
+    }
+    *adv = (size_t)(q - p) + 1;
+    return true;
+}
+
+void mqtt_pub_topic(char *out, size_t out_sz, uint16_t ecu, uint16_t did,
+                    const char *did_name, const char *device,
+                    const char *suffix_override)
+{
+    mqtt_cfg_t cfg;
+    mqtt_cfg_get(&cfg);
+
+    /* A per-datapoint override replaces the formatted part, not the base. */
+    if (suffix_override && suffix_override[0]) {
+        snprintf(out, out_sz, "%s/%s", cfg.base_topic, suffix_override);
+        return;
+    }
+
+    size_t o = (size_t)snprintf(out, out_sz, "%s/", cfg.base_topic);
+    const char *p = cfg.format;
+    char spec[16];
+
+    while (*p && o + 1 < out_sz) {
+        if (*p != '{') {
+            out[o++] = *p++;
+            continue;
+        }
+        p++;
+        size_t adv;
+        char sub[96];
+        if (match_placeholder(p, "didName", &adv, spec, sizeof(spec))) {
+            snprintf(sub, sizeof(sub), "%s", did_name ? did_name : "");
+        } else if (match_placeholder(p, "didNumber", &adv, spec, sizeof(spec))) {
+            /* The documented spec is {didNumber:04d}; treat any d-spec as a
+             * zero-padded width. */
+            int width = (spec[0] == '0') ? atoi(spec) : 0;
+            snprintf(sub, sizeof(sub), "%0*u", width, did);
+        } else if (match_placeholder(p, "ecuAddr", &adv, spec, sizeof(spec))) {
+            if (strchr(spec, 'X')) {
+                snprintf(sub, sizeof(sub), "%03X", ecu);
+            } else if (strchr(spec, 'x')) {
+                snprintf(sub, sizeof(sub), "%03x", ecu);
+            } else {
+                snprintf(sub, sizeof(sub), "%u", ecu);   /* open3e's plain int */
+            }
+        } else if (match_placeholder(p, "device", &adv, spec, sizeof(spec))) {
+            snprintf(sub, sizeof(sub), "%s", device ? device : "");
+        } else {
+            out[o++] = '{';
+            continue;
+        }
+        p += adv;
+        for (const char *s = sub; *s && o + 1 < out_sz; s++) {
+            out[o++] = *s;
+        }
+    }
+    out[o < out_sz ? o : out_sz - 1] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+
+/* Bridges o3e_flatten's callback to the broker. */
+static void publish_leaf(void *user, const char *topic, const char *value)
+{
+    (void)user;
+    mqtt_pub_raw(topic, value, false);
+}
+
+bool mqtt_pub_raw(const char *topic, const char *payload, bool retain)
+{
+    if (!client || !stats.connected) {
+        return false;
+    }
+    int id = esp_mqtt_client_publish(client, topic, payload, 0, 0, retain ? 1 : 0);
+    if (id < 0) {
+        stats.errors++;
+        return false;
+    }
+    stats.published++;
+    return true;
+}
+
+bool mqtt_pub_value(const char *topic, const o3e_node_t *node,
+                    const uint8_t *payload, size_t len, pub_mode_t mode)
+{
+    if (mode == PUB_MODE_FLAT) {
+        uint32_t n = o3e_flatten(node, payload, len, topic, publish_leaf, NULL);
+        return n > 0;
+    }
+
+    char *json = o3e_codec_decode_json(node, payload, len);
+    if (!json) {
+        return false;
+    }
+    bool ok = mqtt_pub_raw(topic, json, false);
+    free(json);
+    return ok;
+}
+
+/* ------------------------------------------------------------------ */
+
+static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    esp_mqtt_event_handle_t e = data;
+    switch ((esp_mqtt_event_id_t)id) {
+    case MQTT_EVENT_CONNECTED: {
+        stats.connected = true;
+        stats.reconnects++;
+        ESP_LOGI(TAG, "connected");
+        /* open3e publishes a retained online/offline flag on <base>/LWT. */
+        esp_mqtt_client_publish(client, lwt_topic, "online", 0, 0, 1);
+        mqtt_cfg_t cfg;
+        mqtt_cfg_get(&cfg);
+        if (cfg.cmnd_topic[0]) {
+            esp_mqtt_client_subscribe(client, cfg.cmnd_topic, 0);
+        }
+        /* Handed to the control task rather than done here: this callback runs
+         * on the client's own task, and blocking it stops the keepalive. */
+        ctl_notify(CTL_ANNOUNCE);
+        break;
+    }
+    case MQTT_EVENT_DISCONNECTED:
+        stats.connected = false;
+        ESP_LOGW(TAG, "disconnected");
+        break;
+    case MQTT_EVENT_ERROR:
+        stats.errors++;
+        break;
+    case MQTT_EVENT_DATA:
+        /* Command handling lives in cmnd.c to keep this file about transport. */
+        mqtt_cmnd_dispatch(e->topic, e->topic_len, e->data, e->data_len);
+        break;
+    default:
+        break;
+    }
+}
+
+bool mqtt_pub_start(void)
+{
+    mqtt_cfg_t cfg;
+    mqtt_cfg_get(&cfg);
+    if (!cfg.enabled || !cfg.host[0]) {
+        ESP_LOGI(TAG, "disabled or no broker configured");
+        return false;
+    }
+
+    char uri[CFG_STR_MAX + 32];
+    snprintf(uri, sizeof(uri), "mqtt://%s:%u", cfg.host, cfg.port);
+    snprintf(lwt_topic, sizeof(lwt_topic), "%s/LWT", cfg.base_topic);
+
+    esp_mqtt_client_config_t mc = {
+        .broker.address.uri = uri,
+        .credentials.username = cfg.user[0] ? cfg.user : NULL,
+        .credentials.authentication.password = cfg.pass[0] ? cfg.pass : NULL,
+        .session.last_will = {
+            .topic = lwt_topic,
+            .msg = "offline",
+            .qos = 0,
+            .retain = 1,
+        },
+        .session.keepalive = 30,
+    };
+
+    client = esp_mqtt_client_init(&mc);
+    if (!client) {
+        return false;
+    }
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, on_mqtt_event, NULL);
+    return esp_mqtt_client_start(client) == ESP_OK;
+}
+
+void mqtt_pub_stop(void)
+{
+    if (!client) {
+        return;
+    }
+    if (stats.connected) {
+        esp_mqtt_client_publish(client, lwt_topic, "offline", 0, 0, 1);
+    }
+    esp_mqtt_client_stop(client);
+    esp_mqtt_client_destroy(client);
+    client = NULL;
+    stats.connected = false;
+}
+
+static void mqtt_ctl_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint32_t what = 0;
+        xTaskNotifyWait(0, UINT32_MAX, &what, portMAX_DELAY);
+
+        if (what & CTL_ANNOUNCE) {
+            /* The broker has just become reachable. Home Assistant needs its
+             * discovery topics again -- they are retained but a fresh broker
+             * or a restarted one has none -- and the datapoints whose first
+             * readings were dropped while disconnected should not wait out a
+             * whole interval. */
+            ha_disco_publish_all();
+            poller_refresh();
+        }
+        if (what & CTL_RESTART) {
+            ESP_LOGI(TAG, "applying new settings");
+            mqtt_pub_stop();
+            mqtt_pub_start();
+        }
+    }
+}
+
+static bool ctl_notify(uint32_t bits)
+{
+    if (!ctl_task_h &&
+        xTaskCreate(mqtt_ctl_task, "mqttctl", 4096, NULL, 4, &ctl_task_h) != pdPASS) {
+        return false;
+    }
+    xTaskNotify(ctl_task_h, bits, eSetBits);
+    return true;
+}
+
+void mqtt_pub_restart(void)
+{
+    if (!ctl_notify(CTL_RESTART)) {
+        /* No task available: do it inline rather than not at all. */
+        mqtt_pub_stop();
+        mqtt_pub_start();
+    }
+}
+
+void mqtt_pub_stats(mqtt_stats_t *out) { *out = stats; }
+bool mqtt_pub_connected(void) { return stats.connected; }

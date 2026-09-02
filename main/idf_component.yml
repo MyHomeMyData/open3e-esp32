@@ -1,0 +1,16 @@
+dependencies:
+  idf:
+    version: ">=6.0"
+  # cJSON and esp-mqtt were built-in components ("json", "mqtt") until
+  # ESP-IDF 6.0 moved both to the component manager.
+  espressif/cjson:
+    version: "^1.7.19"
+  espressif/mqtt:
+    version: "^1.0.0"
+  # LittleFS rather than SPIFFS: the storage partition holds a 1.6 MB database
+  # plus small config files that are rewritten often, and SPIFFS handles neither
+  # large files nor frequent rewrites well.
+  joltwallet/littlefs:
+    version: "^1.14.0"
+  espressif/mdns:
+    version: "^1.2.0"

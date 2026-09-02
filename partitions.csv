@@ -1,0 +1,15 @@
+# 16 MB flash on the ESP32-S3-WROOM-1.
+#
+# The second app slot is reserved but unused: over-the-air updates are not part
+# of this firmware yet, and adding the slot later would move every partition
+# after it, erasing the stored configuration on a device that is likely mounted
+# somewhere inconvenient.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x6000,
+otadata,    data, ota,      0xF000,   0x2000,
+phy_init,   data, phy,      0x11000,  0x1000,
+ota_0,      app,  ota_0,    0x20000,  0x400000,
+ota_1,      app,  ota_1,    0x420000, 0x400000,
+# LittleFS uses the "spiffs" data subtype; ESP-IDF has no separate one for it.
+storage,    data, spiffs,   0x820000, 0x400000,

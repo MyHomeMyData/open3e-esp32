@@ -1,0 +1,34 @@
+open3e-gateway
+Copyright 2026
+
+This firmware speaks the protocol of, and derives its datapoint database from,
+the open3e project:
+
+    https://github.com/open3e/open3e
+    Copyright 2023 abnoname, philippoo66 and contributors
+    Licensed under the Apache License, Version 2.0
+
+The datapoint definitions, enumerations and codec semantics implemented in
+main/o3e_codec.c and packed by tools/gen_dpdb.py originate there.  The open3e
+sources are not vendored into this repository; tools/fetch_open3e.py retrieves
+them at build time and tools/gen_dpdb.py converts them into the on-device
+database.  A copy of the Apache License is available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+The passive support for the Viessmann E380 energy meter (main/em380.c and the
+codec details noted there) derives from E3onCAN:
+
+    https://github.com/MyHomeMyData/E3onCAN
+    Copyright 2023 MyHomeMyData
+    Licensed under the Apache License, Version 2.0
+
+Its datapoint table for the E380 is fetched at build time by
+tools/fetch_open3e.py and packed by tools/gen_dpdb.py, on the same terms as the
+open3e data above.
+
+The C implementation in main/ is an independent port.  It is verified against
+the Python original: tools/gen_fixtures.py, tools/gen_flat_fixtures.py and
+tools/gen_encode_fixtures.py and tools/gen_em_fixtures.py generate test vectors
+by running open3e's and E3onCAN's own codecs, and the tests under test/ require
+the C port to reproduce them exactly.

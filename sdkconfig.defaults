@@ -1,0 +1,49 @@
+# Waveshare ESP32-S3-RS485-CAN: ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM.
+CONFIG_IDF_TARGET="esp32s3"
+
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The resident datapoint tables (~145 KiB) and the compiled codec trees live in
+# PSRAM so internal RAM stays available for the network stack.
+CONFIG_ESP32S3_SPIRAM_SUPPORT=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# A 4 KiB ISO-TP message is around 585 back-to-back CAN frames; the receive
+# queue has to absorb bursts while the poller decodes the previous response.
+CONFIG_TWAI_ISR_IN_IRAM=y
+
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+
+CONFIG_LWIP_LOCAL_HOSTNAME="open3e"
+
+CONFIG_FREERTOS_HZ=1000
+
+# Per-task CPU share and stack headroom on the status page. The overhead is a
+# counter update per context switch; on a device whose job is a 250 kbit/s bus
+# that is not the bottleneck, and it is what makes a task blocking in the wrong
+# place visible before it becomes a panic.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# A firmware update is applied to the spare app partition and only becomes
+# permanent once the new image reports itself healthy (see main/ota.c). Without
+# this, a bad update means fetching a USB cable and a ladder.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Reading a heat pump over CAN is not latency critical, but a wedged bus should
+# never take the whole device down.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
