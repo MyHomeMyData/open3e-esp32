@@ -186,7 +186,10 @@ void mqtt_cfg_get(mqtt_cfg_t *out)
      * command listener and every Home Assistant control -- so heal it on the
      * way out rather than waiting for someone to save the settings again. */
     if (!out->cmnd_topic[0]) {
-        snprintf(out->cmnd_topic, sizeof(out->cmnd_topic), "%s/cmnd",
+        /* Both fields are the same width, so the base has to be clipped to
+         * leave room for the suffix rather than relying on truncation. */
+        snprintf(out->cmnd_topic, sizeof(out->cmnd_topic), "%.*s/cmnd",
+                 (int)(sizeof(out->cmnd_topic) - sizeof("/cmnd")),
                  out->base_topic[0] ? out->base_topic : "open3e");
     }
     nvs_get_str_or(h, "ha_prefix", out->ha_prefix, sizeof(out->ha_prefix),
