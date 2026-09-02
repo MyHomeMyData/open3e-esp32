@@ -2,7 +2,7 @@
 
 PY := .venv/bin/python
 
-.PHONY: help setup db fixtures test sanitize storage lint fwinfo clean
+.PHONY: help setup db fixtures test sanitize storage lint fwinfo site deploy clean
 
 help:
 	@echo "make setup     create the Python venv and fetch open3e"
@@ -14,6 +14,8 @@ help:
 	@echo "               (not normally needed: idf.py build does this)"
 	@echo "make lint      check includes and cross-module symbols"
 	@echo "make fwinfo    show the built firmware's build identity"
+	@echo "make site      assemble the browser-flashing site into build/site"
+	@echo "make deploy    rsync build/site to the web server"
 	@echo ""
 	@echo "Firmware:      idf.py set-target esp32s3 && idf.py build flash"
 
@@ -45,6 +47,36 @@ lint:
 
 fwinfo:
 	@python3 tools/fwinfo.py
+
+# The page people flash from, at esp32can.thomas-peterson.de.
+#
+# CHANNEL says which slot the binaries land in: `release` is what the site
+# offers by default, `dev` is the untested latest. Both can coexist in the same
+# tree, which is why the manifest paths carry the channel.
+CHANNEL     ?= dev
+
+# Where `make deploy` sends it. Kept out of the repository: it is a machine on
+# somebody's home network, and that is nobody else's business. Put them in
+# .deploy.mk (gitignored), for example:
+#
+#     DEPLOY_HOST = root@10.0.0.2
+#     DEPLOY_PATH = /var/www/esp32can
+-include .deploy.mk
+
+site:
+	$(PY) tools/build_site.py --channel $(CHANNEL)
+
+# tar over ssh rather than rsync: the target does not have rsync, and for a
+# tree that is one 4 MB file which changes on every build anyway, delta
+# transfer buys nothing worth installing a package for.
+#
+# Nothing is deleted on the far side on purpose -- this build produced one
+# channel, and it has no business removing the other one's binaries.
+deploy: site
+	@test -n "$(DEPLOY_HOST)" || { echo "DEPLOY_HOST is not set -- see .deploy.mk in the Makefile"; exit 1; }
+	tar -C build/site -czf - . | \
+	  ssh $(DEPLOY_HOST) "mkdir -p $(DEPLOY_PATH) && tar -C $(DEPLOY_PATH) -xzf -"
+	@echo "-> https://esp32can.thomas-peterson.de"
 
 clean:
 	$(MAKE) -C test clean

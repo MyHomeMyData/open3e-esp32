@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>open3e-Gateway flashen</title>
+<meta name="description" content="Viessmann E3 über CAN nach MQTT: Firmware für das Waveshare ESP32-S3-RS485-CAN direkt aus dem Browser aufspielen.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🔌</text></svg>">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg:#f6f7f9; --panel:#fff; --line:#dfe3e8; --ink:#1b1f24;
+  --muted:#6b7480; --accent:#1f6feb; --ok:#1a7f37; --warn:#9a6700; --err:#cf222e;
+  --radius:8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#14171a; --panel:#1c2126; --line:#2d343c; --ink:#e6edf3;
+          --muted:#9198a1; --accent:#4493f8; --ok:#3fb950; --warn:#d29922; --err:#f85149; }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink);
+       font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+.wrap { max-width:720px; margin:0 auto; padding:32px 20px 64px; }
+h1 { font-size:26px; margin:0 0 4px; font-weight:600; letter-spacing:-.01em; }
+h2 { font-size:18px; margin:36px 0 10px; font-weight:600; }
+.lede { color:var(--muted); margin:0 0 28px; }
+.card { background:var(--panel); border:1px solid var(--line);
+        border-radius:var(--radius); padding:20px; margin:16px 0; }
+.card h3 { margin:0 0 2px; font-size:16px; font-weight:600; }
+.card p { margin:0 0 14px; color:var(--muted); font-size:14px; }
+.ver { font:13px/1 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+button.go { font:inherit; font-weight:600; padding:11px 20px; border:0;
+            border-radius:var(--radius); background:var(--accent); color:#fff;
+            cursor:pointer; }
+button.go:hover { filter:brightness(1.08); }
+.card.dev button.go { background:transparent; color:var(--accent);
+                      box-shadow:inset 0 0 0 1px var(--accent); }
+esp-web-install-button { --esp-tools-button-color:var(--accent);
+                         --esp-tools-button-text-color:#fff;
+                         --esp-tools-button-border-radius:var(--radius); }
+.note { border-left:3px solid var(--warn); padding:2px 0 2px 14px;
+        margin:14px 0; color:var(--muted); font-size:14px; }
+.note.bad { border-color:var(--err); }
+ol { padding-left:22px; } ol li { margin:8px 0; }
+code, kbd { font:13px ui-monospace,SFMono-Regular,Menlo,monospace;
+            background:var(--bg); border:1px solid var(--line);
+            border-radius:4px; padding:1px 5px; }
+a { color:var(--accent); }
+footer { margin-top:44px; padding-top:20px; border-top:1px solid var(--line);
+         color:var(--muted); font-size:14px; }
+</style>
+<script type="module"
+        src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+<div class="wrap">
+
+<h1>open3e-Gateway flashen</h1>
+<p class="lede">Viessmann-E3-Geräte — Vitocal, Vitocharge VX3 — über CAN nach
+MQTT, auf einem <b>Waveshare ESP32-S3-RS485-CAN</b>. Board anstecken, Knopf
+drücken. Kein Toolchain, kein Treiber, kein Raspberry Pi.</p>
+
+<div class="card">
+  <h3>Freigabe</h3>
+  <p>Der getestete Stand. <span class="ver" id="v-release">wird geladen …</span></p>
+  <esp-web-install-button manifest="manifest-release.json">
+    <button class="go" slot="activate">Verbinden und flashen</button>
+    <div slot="unsupported"></div>
+    <div slot="not-allowed"></div>
+  </esp-web-install-button>
+</div>
+
+<div class="card dev">
+  <h3>Entwicklungsstand</h3>
+  <p>Der jeweils letzte Stand aus <code>main</code>. Neuer, aber ungeprüft.
+     <span class="ver" id="v-dev">wird geladen …</span></p>
+  <esp-web-install-button manifest="manifest-dev.json">
+    <button class="go" slot="activate">Verbinden und flashen</button>
+    <div slot="unsupported"></div>
+    <div slot="not-allowed"></div>
+  </esp-web-install-button>
+</div>
+
+<!-- Beide Knöpfe verschwinden, wenn der Browser nicht mitspielt. Ohne diesen
+     Hinweis stünde man dann vor einer Seite, auf der nichts passiert. -->
+<div id="browser-warn" hidden>
+  <div class="note bad">
+    <b>Dieser Browser kann nicht flashen.</b> Dafür ist die Web-Serial-Schnittstelle
+    nötig, die es in Safari und auf iOS nicht gibt — Apple lehnt sie ab.
+    Es funktioniert mit <b>Chrome</b> oder <b>Edge</b> ab 89, <b>Opera</b> ab 76,
+    <b>Firefox</b> ab 151 und <b>Chrome für Android</b> ab 151.
+  </div>
+</div>
+<div id="tls-warn" hidden>
+  <div class="note bad">
+    <b>Diese Seite läuft nicht über HTTPS.</b> Web Serial verlangt eine
+    gesicherte Verbindung; über <code>http://</code> bleibt der Knopf wirkungslos.
+    (<code>http://localhost</code> ist die einzige Ausnahme.)
+  </div>
+</div>
+
+<h2>Was passiert beim Flashen</h2>
+<p class="lede" style="margin-bottom:12px">Der Browser fragt nach dem seriellen
+Anschluss und schreibt dann fünf Abschnitte: Bootloader, Partitionstabelle,
+Anwendung und die 4&nbsp;MB grosse Datenpartition mit Datenbank und Oberfläche.
+Zusammen etwa 5&nbsp;MB, das dauert ein paar Minuten.</p>
+
+<div class="note">Beim Erstinstallieren bietet der Assistent an, den Flash zu
+löschen. Bei einem <b>neuen Board</b> ist das richtig. Bei einem Board, das
+schon läuft, wirft es WLAN-Zugangsdaten, MQTT-Einstellungen und die
+Datenpunktauswahl weg — dann lieber ohne Löschen flashen, oder gleich das
+Firmware-Update in der Weboberfläche des Geräts benutzen.</div>
+
+<h2>Danach</h2>
+<ol>
+  <li>Das Gerät spannt einen WLAN-Zugangspunkt <code>Open3E-Setup-XXXX</code> auf.
+      Verbinden, Passwort <code>open3e-setup</code>.</li>
+  <li>Die Einrichtungsseite öffnet sich von selbst. Falls nicht:
+      <code>http://192.168.4.1</code>.</li>
+  <li>Eigenes WLAN auswählen, Passwort eintragen. Das Gerät startet neu und ist
+      danach unter <code>http://open3e.local</code> erreichbar.</li>
+  <li>Dort den CAN-Bus scannen und auswählen, was nach MQTT gehen soll.</li>
+</ol>
+
+<div class="note">Der CAN-Bus läuft mit 250&nbsp;kbit/s. Den
+Abschlusswiderstand auf dem Board nur zuschalten, wenn das Gerät am Ende des
+Busses sitzt — hängt es mitten dazwischen, stört ein dritter Abschluss den Bus.</div>
+
+<footer>
+  Quelltext, Aufbau und Hintergründe:
+  <a href="https://github.com/boonkerz/open3e-esp32">github.com/boonkerz/open3e-esp32</a>.
+  Die Datenpunktdatenbank stammt aus
+  <a href="https://github.com/open3e/open3e">open3e</a> (Apache-2.0), die
+  Smartmeter-Auswertung aus
+  <a href="https://github.com/MyHomeMyData/E3onCAN">E3onCAN</a>.
+  Kein Erzeugnis der Viessmann Climate Solutions SE.
+</footer>
+
+</div>
+
+<script type="module">
+  /* Die Version steht im Manifest, das ohnehin geladen wird -- so zeigt die
+     Seite, was der Knopf tatsaechlich aufspielt, statt es zu behaupten. */
+  for (const [id, file] of [["v-release", "manifest-release.json"],
+                            ["v-dev",     "manifest-dev.json"]]) {
+    const el = document.getElementById(id);
+    try {
+      const r = await fetch(file, { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      const m = await r.json();
+      el.textContent = m.version ? `Version ${m.version}` : "";
+    } catch {
+      el.textContent = "noch nicht veröffentlicht";
+      el.closest(".card").querySelector("esp-web-install-button").hidden = true;
+    }
+  }
+
+  if (!("serial" in navigator)) {
+    document.getElementById("browser-warn").hidden = false;
+  } else if (!window.isSecureContext) {
+    document.getElementById("tls-warn").hidden = false;
+  }
+</script>
+</body>
+</html>

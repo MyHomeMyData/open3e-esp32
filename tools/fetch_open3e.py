@@ -7,19 +7,25 @@ one-line change to OPEN3E_REF below.
 
 open3e is Apache-2.0 licensed; see NOTICE.
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 OPEN3E_URL = "https://github.com/open3e/open3e.git"
-# Pin to a branch or, preferably, an exact commit for reproducible builds.
-OPEN3E_REF = "main"
+# Pinned to an exact commit, not a branch.
+#
+# The datapoint database decides what the device names, decodes and shows, so
+# two builds of the same firmware commit must not be able to disagree about it.
+# A branch name cannot promise that. (open3e's default branch is `master`, not
+# `main` -- cloning the wrong one fails outright.)
+OPEN3E_REF = "ade743ba6f4bd3afa16b16ed56ccd4038e748f6d"   # master, 2026-08-25
 
 # E3onCAN adds the passively broadcast datapoints of the Viessmann energy
 # meters, which open3e does not cover: the E380 answers no UDS request, it only
 # announces itself on the bus.
 E3ONCAN_URL = "https://github.com/MyHomeMyData/E3onCAN.git"
-E3ONCAN_REF = "main"
+E3ONCAN_REF = "833d3ab6d8f6c40b083ae895a7fe26ca1760a502"   # main, 2026-07-15
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / ".cache" / "open3e"
@@ -30,16 +36,37 @@ def run(*args, **kw):
     return subprocess.run(args, check=True, **kw)
 
 
+def head_of(dest: Path) -> str | None:
+    """The commit checked out at `dest`, or None if it is not a git tree."""
+    if not (dest / ".git").exists():
+        return None
+    out = subprocess.run(("git", "-C", str(dest), "rev-parse", "HEAD"),
+                         capture_output=True, text=True)
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
 def fetch(url: str, ref: str, dest: Path, name: str) -> None:
-    if dest.exists():
-        print(f"{name} already present at {dest}")
-        if ref != "main":
-            run("git", "-C", str(dest), "fetch", "--depth", "1", "origin", ref)
-            run("git", "-C", str(dest), "checkout", "--quiet", "FETCH_HEAD")
+    """Put `url` at exactly `ref` under `dest`.
+
+    `git clone --branch` only accepts branches and tags, so a commit is
+    fetched into an empty repository instead. Fetching one commit by its hash
+    needs uploadpack.allowReachableSHA1InWant on the server; GitHub has it.
+    """
+    if head_of(dest) == ref:
+        print(f"{name} already at {ref[:12]}")
         return
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    print(f"cloning {name}@{ref} -> {dest}")
-    run("git", "clone", "--depth", "1", "--branch", ref, url, str(dest))
+    if dest.exists() and head_of(dest) is None:
+        # A tree with no .git -- there is no way to tell what is in it.
+        print(f"{name}: {dest} is not a checkout, replacing it")
+        shutil.rmtree(dest)
+
+    dest.mkdir(parents=True, exist_ok=True)
+    print(f"fetching {name}@{ref[:12]} -> {dest}")
+    if not (dest / ".git").exists():
+        run("git", "-C", str(dest), "init", "--quiet")
+        run("git", "-C", str(dest), "remote", "add", "origin", url)
+    run("git", "-C", str(dest), "fetch", "--quiet", "--depth", "1", "origin", ref)
+    run("git", "-C", str(dest), "checkout", "--quiet", "--force", "FETCH_HEAD")
 
 
 def main() -> int:

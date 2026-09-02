@@ -18,3 +18,6 @@ __pycache__/
 
 # Pulled from dependencies.lock by idf.py; not ours to version.
 managed_components/
+
+# Deploy-Ziel: eine Maschine in einem privaten Netz, gehört nicht ins Repo.
+.deploy.mk
