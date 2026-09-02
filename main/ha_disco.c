@@ -49,6 +49,105 @@ static void device_id(char *out, size_t out_sz)
 /* One config topic per published scalar. In JSON mode a value_template picks
  * the field out of the payload; in flat mode the field already has its own
  * topic and no template is needed. */
+/* User-supplied names for the numbers a datapoint carries.
+ *
+ * The database knows enumerations for the datapoints Viessmann documented as
+ * such, and plain byte values for the rest -- BypassOperationState is a number
+ * from 0 to 2 with no list behind it, so a control for it is a spin box and a
+ * reading of "2" means nothing without the manual. The selection may therefore
+ * carry labels of the operator's own:
+ *
+ *     "labels": {"*": {"0": "geschlossen", "1": "offen", "2": "automatisch"}}
+ *
+ * A field name in place of "*" restricts them to that field; "*" applies to
+ * every numeric leaf of the datapoint, which is what one usually wants because
+ * the interesting one is typically the only numeric field there.
+ *
+ * They turn a number into a select and a bare digit into a word, in both
+ * directions, without touching the database or the decoded value: what goes on
+ * the bus and onto the state topic stays numeric, and only Home Assistant sees
+ * the names.
+ */
+static const cJSON *labels_for(const cJSON *labels, const char *field)
+{
+    if (!cJSON_IsObject(labels)) {
+        return NULL;
+    }
+    const cJSON *by_field = field
+        ? cJSON_GetObjectItemCaseSensitive(labels, field) : NULL;
+    if (cJSON_IsObject(by_field)) {
+        return by_field;
+    }
+    const cJSON *any = cJSON_GetObjectItemCaseSensitive(labels, "*");
+    return cJSON_IsObject(any) ? any : NULL;
+}
+
+/* {% set m = {'0': 'zu', '1': 'offen'} %} -- the head both directions share. */
+static void add_label_map(o3e_buf_t *b, const cJSON *labels, bool text_to_value)
+{
+    o3e_buf_adds(b, "{% set m = {");
+    const cJSON *it;
+    bool first = true;
+    cJSON_ArrayForEach(it, labels) {
+        if (!it->string || !cJSON_IsString(it)) {
+            continue;
+        }
+        if (!first) {
+            o3e_buf_adds(b, ", ");
+        }
+        first = false;
+        /* Jinja dictionary, so single quotes and no JSON escaping. A label with
+         * a quote in it would break the template, so those are dropped rather
+         * than smuggled through. */
+        o3e_buf_adds(b, "'");
+        for (const char *p = text_to_value ? it->valuestring : it->string; *p; p++) {
+            if (*p != '\'' && *p != '\\' && (unsigned char)*p >= 0x20) {
+                char c[2] = { *p, '\0' };
+                o3e_buf_adds(b, c);
+            }
+        }
+        o3e_buf_adds(b, "': ");
+        if (text_to_value) {
+            o3e_buf_adds(b, it->string);       /* the number, unquoted */
+        } else {
+            o3e_buf_adds(b, "'");
+            for (const char *p = it->valuestring; *p; p++) {
+                if (*p != '\'' && *p != '\\' && (unsigned char)*p >= 0x20) {
+                    char c[2] = { *p, '\0' };
+                    o3e_buf_adds(b, c);
+                }
+            }
+            o3e_buf_adds(b, "'");
+        }
+    }
+    o3e_buf_adds(b, "} %}");
+}
+
+/* The state template: a number on the topic becomes the name of that number,
+ * and anything unmapped is shown as it arrived rather than as "None". */
+static char *label_state_template(const cJSON *labels, const char *json_path)
+{
+    o3e_buf_t b;
+    o3e_buf_init(&b);
+    add_label_map(&b, labels, false);
+    if (json_path && json_path[0]) {
+        o3e_buf_adds(&b, "{% set v = value_json");
+        o3e_buf_adds(&b, json_path);
+        o3e_buf_adds(&b, " | string %}");
+    } else {
+        o3e_buf_adds(&b, "{% set v = value | string %}");
+    }
+    o3e_buf_adds(&b, "{{ m.get(v, v) }}");
+    if (b.oom || !b.buf) {
+        o3e_buf_free(&b);
+        return NULL;
+    }
+    char *out = b.buf;
+    b.buf = NULL;
+    o3e_buf_free(&b);
+    return out;
+}
+
 /* What the last walk actually put on the broker. Kept apart because
  "published for 19 datapoints" says nothing about whether any of them
  became operable, and a control that never appears looks exactly like a
@@ -170,7 +269,7 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
                             const char *name, const o3e_node_t *leaf,
                             const char *value_template,
                             uint16_t ecu, uint16_t did, const char *path,
-                            bool writable, bool clear)
+                            bool writable, const cJSON *labels, bool clear)
 {
     if (!writable || !cfg->cmnd_topic[0]) {
         return;
@@ -183,7 +282,11 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
     }
 
     const char *component = NULL;
-    if (leaf->kind == O3E_K_ENUM && leaf->list_name) {
+    if (labels) {
+        /* Named numbers: a list of words beats a spin box that accepts 0..255
+         * when only three of those values mean anything. */
+        component = "select";
+    } else if (leaf->kind == O3E_K_ENUM && leaf->list_name) {
         component = "select";
     } else if (leaf->kind == O3E_K_INT || leaf->kind == O3E_K_BYTEVAL) {
         /* Only these two: their byte width bounds the value, so the control
@@ -206,19 +309,35 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
     /* The value the command carries: a name for a select, a number otherwise.
      * The encoder resolves an enum by its text, which is exactly the option
      * Home Assistant sends back. */
-    char cmd[320];
+    o3e_buf_t cmdb;
+    o3e_buf_init(&cmdb);
+    if (labels) {
+        /* Home Assistant sends the option's text, the bus wants the number, so
+         * the template carries the reverse map. Built on the heap: a label set
+         * is unbounded and this used to be a fixed 320 bytes. */
+        add_label_map(&cmdb, labels, true);
+    }
+    char head[160];
+    snprintf(head, sizeof(head),
+             "{\"mode\": \"write\", \"addr\": \"0x%03X\", \"data\": {\"%u\": ",
+             ecu, did);
+    o3e_buf_adds(&cmdb, head);
     if (field) {
-        snprintf(cmd, sizeof(cmd),
-                 "{\"mode\": \"write\", \"addr\": \"0x%03X\", \"data\": "
-                 "{\"%u\": {\"%s\": %s}}}",
-                 ecu, did, field,
-                 component[0] == 's' ? "\"{{ value }}\"" : "{{ value }}");
+        o3e_buf_adds(&cmdb, "{\"");
+        o3e_buf_adds(&cmdb, field);
+        o3e_buf_adds(&cmdb, "\": ");
+    }
+    if (labels) {
+        o3e_buf_adds(&cmdb, "{{ m[value] }}");
+    } else if (component[0] == 's') {
+        o3e_buf_adds(&cmdb, "\"{{ value }}\"");
     } else {
-        snprintf(cmd, sizeof(cmd),
-                 "{\"mode\": \"write\", \"addr\": \"0x%03X\", \"data\": "
-                 "{\"%u\": %s}}",
-                 ecu, did,
-                 component[0] == 's' ? "\"{{ value }}\"" : "{{ value }}");
+        o3e_buf_adds(&cmdb, "{{ value }}");
+    }
+    o3e_buf_adds(&cmdb, field ? "}}}" : "}}");
+    if (cmdb.oom || !cmdb.buf) {
+        o3e_buf_free(&cmdb);
+        return;
     }
 
     o3e_buf_t b;
@@ -234,14 +353,32 @@ static void publish_control(const mqtt_cfg_t *cfg, const char *dev_id,
     o3e_buf_adds(&b, ", \"command_topic\": ");
     o3e_buf_add_json_str(&b, cfg->cmnd_topic);
     o3e_buf_adds(&b, ", \"command_template\": ");
-    o3e_buf_add_json_str(&b, cmd);
+    o3e_buf_add_json_str(&b, cmdb.buf);
+    o3e_buf_free(&cmdb);
 
     char uid[176];
     snprintf(uid, sizeof(uid), "%s_%s_set", dev_id, object_id);
     o3e_buf_adds(&b, ", \"unique_id\": ");
     o3e_buf_add_json_str(&b, uid);
 
-    if (component[0] == 's') {
+    if (labels) {
+        /* The options are the labels themselves, in the order they were given.
+         * A select without options is rejected outright by Home Assistant. */
+        o3e_buf_adds(&b, ", \"options\": [");
+        const cJSON *it;
+        bool first = true;
+        cJSON_ArrayForEach(it, labels) {
+            if (!cJSON_IsString(it)) {
+                continue;
+            }
+            if (!first) {
+                o3e_buf_adds(&b, ", ");
+            }
+            first = false;
+            o3e_buf_add_json_str(&b, it->valuestring);
+        }
+        o3e_buf_adds(&b, "]");
+    } else if (component[0] == 's') {
         o3e_buf_adds(&b, ", \"options\": [");
         size_t count = o3e_db_enum_count(leaf->list_name);
         for (size_t i = 0, written = 0; i < count; i++) {
@@ -306,7 +443,7 @@ static void publish_leaf(const mqtt_cfg_t *cfg, const char *dev_id,
                          const char *state_topic, const o3e_node_t *n,
                          const char *did_name, uint16_t did, uint16_t ecu,
                          const char *path, const char *tmpl,
-                         bool flat, bool writable, bool clear)
+                         bool flat, bool writable, const cJSON *labels, bool clear)
 {
         char object_id[192];
         snprintf(object_id, sizeof(object_id), "%03x_%u%s", ecu, did, path);
@@ -324,6 +461,10 @@ static void publish_leaf(const mqtt_cfg_t *cfg, const char *dev_id,
            what the encoder accepts back, so both the sensor and the control
            point at it. */
         bool is_enum = (n->kind == O3E_K_ENUM);
+        /* Labels only make sense for a bare number. An enum already has names,
+           and raw bytes or text have nothing to map. */
+        const cJSON *lbl = (n->kind == O3E_K_INT || n->kind == O3E_K_BYTEVAL)
+                         ? labels_for(labels, path[0] ? path + 1 : NULL) : NULL;
 
         if (flat) {
             /* Flat mode gives each leaf its own topic; path segments are
@@ -338,17 +479,21 @@ static void publish_leaf(const mqtt_cfg_t *cfg, const char *dev_id,
             }
             snprintf(leaf_topic, sizeof(leaf_topic), "%s%s%s", state_topic, sub,
                      is_enum ? "/Text" : "");
-            publish_entity(cfg, dev_id, leaf_topic, object_id, name, n, NULL, clear);
-            publish_control(cfg, dev_id, leaf_topic, object_id, name, n, NULL,
-                            ecu, did, path, writable, clear);
+            char *lt = lbl ? label_state_template(lbl, NULL) : NULL;
+            publish_entity(cfg, dev_id, leaf_topic, object_id, name, n, lt, clear);
+            publish_control(cfg, dev_id, leaf_topic, object_id, name, n, lt,
+                            ecu, did, path, writable, lbl, clear);
+            free(lt);
         } else {
             char t[256];
             snprintf(t, sizeof(t), "{{ value_json%s%s }}", tmpl,
                      is_enum ? ".Text" : "");
-            const char *vt = (tmpl[0] || is_enum) ? t : "{{ value }}";
+            char *lt = lbl ? label_state_template(lbl, tmpl) : NULL;
+            const char *vt = lt ? lt : ((tmpl[0] || is_enum) ? t : "{{ value }}");
             publish_entity(cfg, dev_id, state_topic, object_id, name, n, vt, clear);
             publish_control(cfg, dev_id, state_topic, object_id, name, n, vt,
-                            ecu, did, path, writable, clear);
+                            ecu, did, path, writable, lbl, clear);
+            free(lt);
         }
 }
 
@@ -360,7 +505,8 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
                         const char *state_topic, const o3e_node_t *n,
                         const char *did_name, uint16_t did, uint16_t ecu,
                         char *path, size_t path_sz, char *tmpl, size_t tmpl_sz,
-                        bool flat, bool writable, bool clear, int depth)
+                        bool flat, bool writable, const cJSON *labels,
+                        bool clear, int depth)
 {
     if (depth > 4) {
         return;   /* deeply nested lists are not useful as entities */
@@ -379,7 +525,7 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
             snprintf(path + plen, path_sz - plen, "_%s", k->id ? k->id : "");
             snprintf(tmpl + tlen, tmpl_sz - tlen, ".%s", k->id ? k->id : "");
             walk_leaves(cfg, dev_id, state_topic, k, did_name, did, ecu,
-                        path, path_sz, tmpl, tmpl_sz, flat, writable,
+                        path, path_sz, tmpl, tmpl_sz, flat, writable, labels,
                         clear, depth + 1);
             path[plen] = '\0';
             tmpl[tlen] = '\0';
@@ -398,7 +544,7 @@ static void walk_leaves(const mqtt_cfg_t *cfg, const char *dev_id,
          * Keeping them in their own frame is what stops this from overflowing
          * the MQTT control task's stack. */
         publish_leaf(cfg, dev_id, state_topic, n, did_name, did, ecu,
-                     path, tmpl, flat, writable, clear);
+                     path, tmpl, flat, writable, labels, clear);
         return;
     }
 }
@@ -468,7 +614,7 @@ static void ha_disco_walk_selection(bool clear)
         walk_leaves(&cfg, dev_id, state_topic, node,
                     node->id ? node->id : "datapoint", did, ecu,
                     path, sizeof(path), tmpl, sizeof(tmpl), flat, writable,
-                    clear, 0);
+                    cJSON_GetObjectItemCaseSensitive(it, "labels"), clear, 0);
         o3e_codec_free(node);
         count++;
     }

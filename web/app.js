@@ -387,6 +387,46 @@ function currentEcu() {
   return Number($("pt-ecu").value) || (system.devices?.[0]?.addr ?? 0);
 }
 
+/* Labels turn a bare number into a word, in Home Assistant only.
+ *
+ * The database names the values of the datapoints Viessmann documented as
+ * enumerations; the rest are plain numbers, and a bypass reading of "2" means
+ * nothing without the manual. Typing "0=zu, 1=offen, 2=automatisch" here makes
+ * that datapoint a named choice instead of a spin box accepting 0..255.
+ *
+ * Stored inside the selection entry, so it travels with an export and needs no
+ * second file. "*" applies to every numeric field of the datapoint, which is
+ * what one wants when only one of them carries meaning; a name in front
+ * ("BypassStatus: 0=zu, ...") restricts them to that field. */
+function parseLabels(text) {
+  const t = text.trim();
+  if (!t) return undefined;
+  let field = "*", body = t;
+  const colon = t.indexOf(":");
+  /* A colon names a field only when what precedes it is not itself a mapping. */
+  if (colon > 0 && !t.slice(0, colon).includes("=")) {
+    field = t.slice(0, colon).trim();
+    body = t.slice(colon + 1);
+  }
+  const map = {};
+  for (const part of body.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k !== "" && v !== "" && /^-?\d+$/.test(k)) map[k] = v;
+  }
+  return Object.keys(map).length ? { [field]: map } : undefined;
+}
+
+function formatLabels(labels) {
+  if (!labels) return "";
+  const field = Object.keys(labels)[0];
+  if (!field) return "";
+  const body = Object.entries(labels[field]).map(([k, v]) => `${k}=${v}`).join(", ");
+  return field === "*" ? body : `${field}: ${body}`;
+}
+
 function renderPoints() {
   const tbody = document.querySelector("#pt-table tbody");
   tbody.innerHTML = "";
@@ -440,21 +480,32 @@ function renderPoints() {
     const topic = el("input", { type: "text", value: cfg?.topic ?? "",
                                 placeholder: dp.name, disabled: !cfg });
     const ha = el("input", { type: "checkbox", checked: cfg?.ha ?? true, disabled: !cfg });
+    const labels = el("input", {
+      type: "text", value: formatLabels(cfg?.labels), disabled: !cfg,
+      style: "width:186px", className: "mono small",
+      placeholder: "0=zu, 1=offen",
+      title: "Benennt die Zahlen dieses Datenpunkts für Home Assistant und macht "
+           + "daraus eine Auswahlliste statt eines Zahlenfelds. Leer lassen, wenn "
+           + "die Zahl selbst genügt. Mit vorangestelltem Feldnamen "
+           + "(\"BypassStatus: 0=zu, 1=offen\") nur für dieses Feld.",
+    });
     const valCell = el("td", { className: "mono small muted" });
 
     const sync = () => {
-      for (const c of [iv, mode, topic, ha]) c.disabled = !on.checked;
+      for (const c of [iv, mode, topic, ha, labels]) c.disabled = !on.checked;
       if (on.checked) {
+        const lb = parseLabels(labels.value);
         selection.set(key, {
           ecu, did: dp.did, len: dp.len, enabled: true,
           interval: Number(iv.value) || 60,
           mode: mode.value, topic: topic.value, ha: ha.checked,
+          ...(lb ? { labels: lb } : {}),
         });
       } else {
         selection.delete(key);
       }
     };
-    for (const c of [on, iv, mode, topic, ha]) c.onchange = sync;
+    for (const c of [on, iv, mode, topic, ha, labels]) c.onchange = sync;
 
     const readBtn = el("button", { className: "btn sec small", textContent: "lesen",
                                    style: "padding:2px 8px" });
@@ -495,6 +546,7 @@ function renderPoints() {
       el("td", {}, mode),
       el("td", {}, topic),
       el("td", {}, ha),
+      el("td", {}, labels),
       valCell));
   }
 

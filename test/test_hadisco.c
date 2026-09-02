@@ -247,6 +247,54 @@ int main(int argc, char **argv)
         ok("temperature leaf is announced", 0, NULL);
     }
 
+    /* --- labels turn a bare number into a named choice, both ways --- */
+    reset("[{\"ecu\":1664,\"did\":437,\"len\":2,\"enabled\":true,\"interval\":60,"
+          "\"mode\":\"flat\",\"topic\":\"\",\"ha\":true,"
+          "\"labels\":{\"*\":{\"0\":\"geschlossen\",\"1\":\"offen\","
+          "\"2\":\"automatisch\"}}}]", "open3e-vent/cmnd", "flat");
+    ha_disco_publish_all();
+
+    if (getenv("DUMP")) {
+        for (size_t i = 0; i < g_n; i++) printf("    %s\n", g_msgs[i].topic);
+    }
+    m = find("homeassistant/select/open3e_112233/680_437_BypassStatus_set/config");
+    ok("a labelled number becomes a select, not a spin box", m != NULL, NULL);
+    if (m) {
+        cJSON *j = cJSON_Parse(m->payload);
+        ok("labelled control payload is valid JSON", j != NULL, m->payload);
+        if (j) {
+            const cJSON *opts = cJSON_GetObjectItem(j, "options");
+            ok("options are the labels", cJSON_IsArray(opts)
+                 && cJSON_GetArraySize(opts) == 3
+                 && strcmp(cJSON_GetArrayItem(opts, 0)->valuestring, "geschlossen") == 0
+                 && strcmp(cJSON_GetArrayItem(opts, 2)->valuestring, "automatisch") == 0,
+               m->payload);
+            ok("a labelled select has no numeric range",
+               cJSON_GetObjectItem(j, "max") == NULL, m->payload);
+
+            /* Home Assistant sends the word; the bus must receive the number. */
+            const cJSON *tp = cJSON_GetObjectItem(j, "command_template");
+            ok("command_template maps the word back to its number",
+               cJSON_IsString(tp)
+                 && strstr(tp->valuestring, "'automatisch': 2") != NULL
+                 && strstr(tp->valuestring, "{{ m[value] }}") != NULL,
+               cJSON_IsString(tp) ? tp->valuestring : "(none)");
+
+            /* And the reading must show the word, not the digit. */
+            const cJSON *vt = cJSON_GetObjectItem(j, "value_template");
+            ok("value_template maps the number to its word",
+               cJSON_IsString(vt)
+                 && strstr(vt->valuestring, "'2': 'automatisch'") != NULL
+                 && strstr(vt->valuestring, "m.get(v, v)") != NULL,
+               cJSON_IsString(vt) ? vt->valuestring : "(none)");
+            cJSON_Delete(j);
+        }
+    }
+    /* The number control must be gone, or Home Assistant shows both. */
+    ok("no spin box alongside the select",
+       find("homeassistant/number/open3e_112233/680_437_BypassStatus_set/config") == NULL,
+       NULL);
+
     printf("%s: %zu discovery messages inspected\n", fail ? "FAILED" : "ha_disco", g_n);
     return fail ? 1 : 0;
 }
