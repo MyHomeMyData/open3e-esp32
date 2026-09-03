@@ -565,7 +565,8 @@
     <p class="small muted" id="dbg-wstate" style="margin:10px 0 0"></p>
   </div>
   <div class="card">
-    <h2>Weboberfläche aktualisieren</h2>
+    <h2>1 · Nur die Weboberfläche</h2>
+    <p class="hint"><b>Nicht</b> die Anwendung. Ändert nur, was der Browser zeigt — neue Bedienelemente aus der Firmware bleiben wirkungslos, wenn die Anwendung sie nicht kennt. Im Zweifel Karte&nbsp;3.</p>
     <p class="hint">Die Oberfläche liegt auf der Storage-Partition, nicht in der
       Firmware. Einzelne Dateien lassen sich hier direkt ersetzen — der schnelle
       Weg, solange sich noch täglich etwas ändert.</p>
@@ -578,7 +579,7 @@
   </div>
 
   <div class="card">
-    <h2>Datenbank aktualisieren</h2>
+    <h2>2 · Nur die Datenpunktdatenbank</h2>
     <p class="hint">Ersetzt die gesamte Storage-Partition mit
       <span class="mono">build/storage.bin</span> — nötig, wenn sich die
       open3e-Datenpunktdatenbank geändert hat.</p>
@@ -599,7 +600,8 @@
   </div>
 
   <div class="card">
-    <h2>Firmware-Update</h2>
+    <h2>3 · Die Anwendung</h2>
+    <p class="hint">Die Firmware selbst. Alles, was nicht Oberfläche oder Datenbank ist, steckt hier — Busverkehr, MQTT, Discovery, Schreibpfad. Nach einer neuen Version ist das die Karte, die zählt.</p>
     <p class="hint">Lade <span class="mono">build/open3e-gateway.bin</span> hoch.
       Das Abbild wird in die zweite App-Partition geschrieben; die laufende
       Firmware bleibt bis zum Schluss unangetastet.</p>
