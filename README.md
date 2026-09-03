@@ -386,16 +386,36 @@ den Schreibbefehl. Gemessen: `-1000` ergab 1003 W Netzbezug und 1046 W mehr
 Ladeleistung, aufgebaut über etwa fünf Sekunden.
 
 Ein einzelner Schreibvorgang hält nur bis zur nächsten Auffrischung des
-Reglers. Deshalb *Debug → Aus dem Netz laden*: Leistung, Dauer, und die
-Firmware schreibt alle zwei Sekunden nach. Höchstens 6000 W und 60 Minuten je
-Anforderung.
+Reglers. Deshalb schreibt die Firmware alle zwei Sekunden nach.
 
-Über MQTT für den Betrieb an einem dynamischen Tarif:
+### Bedienung
+
+Einmalig: *Einstellungen* → **Schreiben freigeben**, und die ECU der
+Speichereinheit heraussuchen — im Scan die mit `EMCUSLAVE`.
+
+Von Hand: *Debug* → **Aus dem Netz laden** → Leistung negativ, Dauer in
+Minuten, **Halten**.
+
+Aus einer Hausautomatisierung, für den Betrieb an einem dynamischen Tarif,
+auf `<base>/cmnd`:
 
 ```json
 {"mode": "grid", "addr": "0x6A1", "watts": -2000, "seconds": 1800}
 {"mode": "grid", "stop": true}
 ```
+
+Eine Automatisierung, die bei niedrigem Börsenpreis feuert, schickt genau
+diese eine Nachricht und erneuert sie, solange das Preisfenster offen ist.
+
+Ob es wirkt, steht in `PointOfCommonCouplingPower` (positiv = Bezug) und
+`ElectricalEnergyStorageCurrentPower` (negativ = lädt). Bei einem
+funktionierenden Halten bleiben die stabil, statt nach zehn Sekunden
+zurückzufallen. Mehr als die Ladegrenze aus DID 1828 nimmt die Anlage nicht
+an, gleich was gefordert wird.
+
+Gemessen an einer laufenden Anlage: angefordert −2000 W, am Netzanschluss
+2000 W Bezug, Batterie 2400 W Ladeleistung bei 917 W PV und 446 W
+Hausverbrauch — die Bilanz geht bis auf 71 W Wandlungsverlust auf.
 
 **Es bleibt nichts zurück.** Zeitablauf, Neustart, Absturz, Stromausfall,
 abgezogenes Kabel — jedes davon beendet das Halten, und der Energiemanager hat
