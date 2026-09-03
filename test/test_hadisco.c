@@ -27,6 +27,10 @@ typedef struct { char *topic; char *payload; } msg_t;
 static msg_t  g_msgs[512];
 static size_t g_n;
 
+/* The discovery code only reads grid_hold's caps; the module itself is not
+ * linked here, so its state accessor is stubbed. */
+void grid_hold_status(void *out) { (void)out; }
+
 int esp_read_mac(uint8_t *out, int t)
 {
     (void)t;
@@ -298,6 +302,60 @@ int main(int argc, char **argv)
     ok("the number's config is retracted, not merely abandoned",
        m != NULL && m->payload[0] == '\0',
        m ? (m->payload[0] ? m->payload : "(empty)") : "(never published)");
+
+    /* --- the grid hold announces itself, and its templates must be usable --- */
+    snprintf(points, sizeof(points), POINTS_533, "flat");
+    reset(points, "open3e-vent/cmnd", "flat");
+    ha_disco_publish_all();
+
+    struct { const char *topic; const char *what; } want[] = {
+        { "homeassistant/switch/open3e_112233/grid_hold/config",     "Schalter" },
+        { "homeassistant/number/open3e_112233/grid_power/config",    "Leistung" },
+        { "homeassistant/number/open3e_112233/grid_minutes/config",  "Dauer" },
+        { "homeassistant/sensor/open3e_112233/grid_remaining/config","Restzeit" },
+    };
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        m = find(want[i].topic);
+        ok("grid entity announced", m != NULL, want[i].what);
+        if (!m) {
+            continue;
+        }
+        cJSON *j = cJSON_Parse(m->payload);
+        ok("grid entity payload is valid JSON", j != NULL, m->payload);
+        if (!j) {
+            continue;
+        }
+        const cJSON *st = cJSON_GetObjectItem(j, "state_topic");
+        ok("grid entity reads the hold's own topic",
+           cJSON_IsString(st) && strcmp(st->valuestring, "open3e-vent/grid") == 0,
+           cJSON_IsString(st) ? st->valuestring : "(none)");
+        /* Whatever the entity sends must be a command this gateway accepts. */
+        for (const char *key = "payload_on";; key = "command_template") {
+            const cJSON *p = cJSON_GetObjectItem(j, key);
+            if (cJSON_IsString(p)) {
+                char filled[512], *w = filled;
+                for (const char *q = p->valuestring;
+                     *q && w < filled + sizeof(filled) - 8; ) {
+                    if (strncmp(q, "{{ value }}", 11) == 0) { *w++ = '9'; q += 11; }
+                    else { *w++ = *q++; }
+                }
+                *w = '\0';
+                cJSON *c = cJSON_Parse(filled);
+                ok("grid command renders to valid JSON", c != NULL, filled);
+                if (c) {
+                    const cJSON *md = cJSON_GetObjectItem(c, "mode");
+                    ok("grid command carries mode=grid",
+                       cJSON_IsString(md) && strcmp(md->valuestring, "grid") == 0,
+                       filled);
+                    cJSON_Delete(c);
+                }
+            }
+            if (strcmp(key, "command_template") == 0) {
+                break;
+            }
+        }
+        cJSON_Delete(j);
+    }
 
     printf("%s: %zu discovery messages inspected\n", fail ? "FAILED" : "ha_disco", g_n);
     return fail ? 1 : 0;

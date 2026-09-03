@@ -767,6 +767,16 @@ static esp_err_t h_grid(httpd_req_t *r)
     if (!grid_hold_start(ecu, watts, seconds, err, sizeof(err))) {
         return send_err(r, 400, err[0] ? err : "cannot start the hold");
     }
+    /* Remember what was asked for, so the Home Assistant switch and this form
+     * mean the same thing. Stored positive: the sign belongs to the datapoint,
+     * not to the operator. */
+    sys_cfg_t sys;
+    sys_cfg_get(&sys);
+    sys.grid_ecu = ecu;
+    sys.grid_watts = (uint16_t)(watts < 0 ? -watts : watts);
+    sys.grid_minutes = (uint16_t)((seconds + 59) / 60);
+    sys_cfg_set(&sys);
+    grid_hold_publish();
     return send_json(r, "{\"ok\": true}");
 }
 

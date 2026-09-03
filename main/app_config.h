@@ -65,6 +65,14 @@ typedef struct {
      * datapoints on one channel and its control mode on another. */
     char collect_canids[CFG_STR_MAX];
     char tz[CFG_STR_MAX];   /* POSIX TZ, default "CET-1CEST,M3.5.0,M10.5.0/3" */
+    /* What a bare "start charging" means: which storage unit, how much, and
+     * for how long. Kept as settings rather than passed with every command so
+     * that a Home Assistant switch has something to switch -- the hold itself
+     * is deliberately not persistent, but what it would do is. `grid_watts` is
+     * positive and means "draw this much from the grid". */
+    uint16_t grid_ecu;
+    uint16_t grid_watts;
+    uint16_t grid_minutes;
 } sys_cfg_t;
 
 bool app_config_init(void);          /* opens NVS and mounts LittleFS */

@@ -67,4 +67,14 @@ void grid_hold_stop(void);
 
 void grid_hold_status(grid_hold_status_t *out);
 
+/* Start from the stored settings, or stop. This is what a Home Assistant
+ * switch flips: the switch has no room to carry a power and a duration, so it
+ * uses the ones in the system settings. */
+bool grid_hold_switch(bool on, char *err, size_t err_sz);
+
+/* Publish the state to <base>/grid, retained. Called on every change and
+ * regularly while a hold runs, so a subscriber that connects late still learns
+ * that something is overriding the installation's own regulation. */
+void grid_hold_publish(void);
+
 #endif /* O3E_GRID_HOLD_H */

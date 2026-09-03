@@ -253,6 +253,9 @@ void sys_cfg_get(sys_cfg_t *out)
     nvs_get_str_or(h, "coll_ids", out->collect_canids, sizeof(out->collect_canids),
                    "0x451,0x441");
     nvs_get_str_or(h, "tz", out->tz, sizeof(out->tz), tz_default);
+    out->grid_ecu = (uint16_t)nvs_get_u16_or(h, "grid_ecu", 0);
+    out->grid_watts = (uint16_t)nvs_get_u16_or(h, "grid_w", 2000);
+    out->grid_minutes = (uint16_t)nvs_get_u16_or(h, "grid_min", 15);
     nvs_close(h);
 }
 
@@ -268,6 +271,9 @@ bool sys_cfg_set(const sys_cfg_t *in)
     nvs_set_str(h, "coll_ids",
                 in->collect_canids[0] ? in->collect_canids : "0x451,0x441");
     nvs_set_str(h, "tz", in->tz);
+    nvs_set_u16(h, "grid_ecu", in->grid_ecu);
+    nvs_set_u16(h, "grid_w", in->grid_watts ? in->grid_watts : 2000);
+    nvs_set_u16(h, "grid_min", in->grid_minutes ? in->grid_minutes : 15);
     bool ok = nvs_commit(h) == ESP_OK;
     nvs_close(h);
     return ok;

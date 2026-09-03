@@ -9,12 +9,15 @@
 #include "esp_mac.h"
 
 #include "app_config.h"
+#include "grid_hold.h"
 #include "mqtt_pub.h"
 #include "o3e_codec.h"
 #include "o3e_db.h"
 #include "o3e_json.h"
 
 static const char *TAG = "ha";
+
+static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear);
 
 /* Map the open3e unit string onto a Home Assistant device class. Only units
  * that actually occur in the database are listed; anything else is published
@@ -635,6 +638,10 @@ static void ha_disco_walk_selection(bool clear)
         count++;
     }
     cJSON_Delete(root);
+
+    /* Not a datapoint, so the walk never reaches it -- announced separately. */
+    ha_disco_grid(&cfg, dev_id, clear);
+
     /* Counted separately: "published for 19 datapoints" says nothing about
      * whether any of them became operable, and a control that never appears
      * looks exactly like a datapoint that is read-only. */
@@ -642,6 +649,106 @@ static void ha_disco_walk_selection(bool clear)
              clear ? "cleared" : "published", count, n_sensors, n_controls,
              (!clear && n_controls == 0 && !cfg.cmnd_topic[0])
                  ? " (no command topic configured)" : "");
+}
+
+/* The grid hold, as three entities of its own.
+ *
+ * It is not a datapoint, so the walk above never reaches it: it is a thing the
+ * gateway does, not a value the bus carries. A switch to run it, a number for
+ * how much, and a countdown -- because something overriding the installation's
+ * own regulation should be visible and stoppable from wherever the operator
+ * happens to be looking, not only on this device's own page.
+ */
+static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
+                                const char *component, const char *object,
+                                const char *name, const char *extra, bool clear)
+{
+    bool is_sensor = strcmp(component, "sensor") == 0;
+
+    char topic[352];
+    snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
+             cfg->ha_prefix, component, dev_id, object);
+    if (clear) {
+        mqtt_pub_raw(topic, "", true);
+        *(is_sensor ? &n_sensors : &n_controls) += 1;
+        return;
+    }
+    /* A switch or a number with nowhere to send is furniture: it would sit in
+     * Home Assistant looking operable and do nothing. The countdown is worth
+     * having either way, since it only reads. */
+    if (!is_sensor && !cfg->cmnd_topic[0]) {
+        return;
+    }
+
+    char state[CFG_TOPIC_MAX + 8], lwt[CFG_TOPIC_MAX + 8];
+    snprintf(state, sizeof(state), "%s/grid", cfg->base_topic);
+    snprintf(lwt, sizeof(lwt), "%s/LWT", cfg->base_topic);
+
+    o3e_buf_t b;
+    o3e_buf_init(&b);
+    o3e_buf_adds(&b, "{\"name\": ");
+    o3e_buf_add_json_str(&b, name);
+    o3e_buf_adds(&b, ", \"state_topic\": ");
+    o3e_buf_add_json_str(&b, state);
+    o3e_buf_adds(&b, ", \"unique_id\": ");
+    char uid[160];
+    snprintf(uid, sizeof(uid), "%s_%s", dev_id, object);
+    o3e_buf_add_json_str(&b, uid);
+    if (cfg->cmnd_topic[0]) {
+        o3e_buf_adds(&b, ", \"command_topic\": ");
+        o3e_buf_add_json_str(&b, cfg->cmnd_topic);
+    }
+    o3e_buf_adds(&b, ", ");
+    o3e_buf_adds(&b, extra);
+    o3e_buf_adds(&b, ", \"availability_topic\": ");
+    o3e_buf_add_json_str(&b, lwt);
+    o3e_buf_adds(&b, ", \"payload_available\": \"online\""
+                     ", \"payload_not_available\": \"offline\"");
+    o3e_buf_adds(&b, ", \"device\": {\"identifiers\": [");
+    o3e_buf_add_json_str(&b, dev_id);
+    o3e_buf_adds(&b, "]}}");
+    if (!b.oom && b.buf) {
+        mqtt_pub_raw(topic, b.buf, true);
+        *(is_sensor ? &n_sensors : &n_controls) += 1;
+    }
+    o3e_buf_free(&b);
+}
+
+static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
+{
+    publish_grid_entity(cfg, dev_id, "switch", "grid_hold",
+        "Aus dem Netz laden",
+        "\"value_template\": \"{{ 'ON' if value_json.active else 'OFF' }}\", "
+        "\"payload_on\": \"{\\\"mode\\\": \\\"grid\\\", \\\"on\\\": true}\", "
+        "\"payload_off\": \"{\\\"mode\\\": \\\"grid\\\", \\\"on\\\": false}\", "
+        "\"icon\": \"mdi:transmission-tower-import\"", clear);
+
+    char num[320];
+    snprintf(num, sizeof(num),
+        "\"value_template\": \"{{ value_json.power }}\", "
+        "\"command_template\": \"{\\\"mode\\\": \\\"grid\\\", "
+        "\\\"power\\\": {{ value }}}\", "
+        "\"min\": 100, \"max\": %d, \"step\": 100, \"mode\": \"box\", "
+        "\"unit_of_measurement\": \"W\", \"icon\": \"mdi:flash\"",
+        GRID_HOLD_MAX_W);
+    publish_grid_entity(cfg, dev_id, "number", "grid_power",
+                        "Netzladeleistung", num, clear);
+
+    snprintf(num, sizeof(num),
+        "\"value_template\": \"{{ value_json.minutes }}\", "
+        "\"command_template\": \"{\\\"mode\\\": \\\"grid\\\", "
+        "\\\"minutes\\\": {{ value }}}\", "
+        "\"min\": 1, \"max\": %d, \"step\": 1, \"mode\": \"box\", "
+        "\"unit_of_measurement\": \"min\", \"icon\": \"mdi:timer-outline\"",
+        GRID_HOLD_MAX_S / 60);
+    publish_grid_entity(cfg, dev_id, "number", "grid_minutes",
+                        "Netzladedauer", num, clear);
+
+    publish_grid_entity(cfg, dev_id, "sensor", "grid_remaining",
+        "Netzladen Restzeit",
+        "\"value_template\": \"{{ value_json.remainingS }}\", "
+        "\"unit_of_measurement\": \"s\", \"device_class\": \"duration\", "
+        "\"icon\": \"mdi:timer-sand\"", clear);
 }
 
 void ha_disco_counts(int *sensors, int *controls)

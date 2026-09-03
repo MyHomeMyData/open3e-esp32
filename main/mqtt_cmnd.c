@@ -108,17 +108,63 @@ static void do_read(uint16_t ecu, const cJSON *data)
  * caps live in grid_hold.c; nothing here can widen them. */
 static void do_grid(uint16_t ecu, const cJSON *root)
 {
+    char err[128] = "";
+
+    /* "power" and "minutes" adjust the stored settings -- what a bare switch
+     * means when it is turned on. Positive watts, reading as "draw this much
+     * from the grid"; the sign belongs to the datapoint, not to the operator. */
+    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "power");
+    const cJSON *jm = cJSON_GetObjectItemCaseSensitive(root, "minutes");
+    if (cJSON_IsNumber(jp) || cJSON_IsNumber(jm)) {
+        sys_cfg_t sys;
+        sys_cfg_get(&sys);
+        if (cJSON_IsNumber(jp)) {
+            int w = (int)jp->valuedouble;
+            sys.grid_watts = (uint16_t)(w < 0 ? -w : w);
+        }
+        if (cJSON_IsNumber(jm)) {
+            sys.grid_minutes = (uint16_t)jm->valuedouble;
+        }
+        /* Only an explicitly addressed message may change which unit is meant;
+         * without "addr" the caller got a default and did not choose it. */
+        if (cJSON_GetObjectItemCaseSensitive(root, "addr")) {
+            sys.grid_ecu = ecu;
+        }
+        sys_cfg_set(&sys);
+
+        grid_hold_status_t st;
+        grid_hold_status(&st);
+        if (st.active) {
+            /* Restart at the new value: a setting that only takes effect the
+             * next time round is a trap. */
+            if (!grid_hold_switch(true, err, sizeof(err))) {
+                reply_error("grid hold refused: %s", err);
+            }
+        } else {
+            grid_hold_publish();
+        }
+        return;
+    }
+
+    const cJSON *on = cJSON_GetObjectItemCaseSensitive(root, "on");
+    if (cJSON_IsBool(on)) {
+        if (!grid_hold_switch(cJSON_IsTrue(on), err, sizeof(err))) {
+            reply_error("grid hold refused: %s", err);
+        }
+        return;
+    }
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "stop"))) {
         grid_hold_stop();
         return;
     }
+
     const cJSON *jw = cJSON_GetObjectItemCaseSensitive(root, "watts");
     const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "seconds");
     if (!cJSON_IsNumber(jw) || !cJSON_IsNumber(js)) {
-        reply_error("grid expects \"watts\" and \"seconds\", or \"stop\": true");
+        reply_error("grid expects \"watts\" and \"seconds\", \"on\": true/false, "
+                    "\"stop\": true, or \"power\"/\"minutes\"");
         return;
     }
-    char err[128] = "";
     if (!grid_hold_start(ecu, (int16_t)jw->valuedouble,
                          (uint32_t)js->valuedouble, err, sizeof(err))) {
         reply_error("grid hold refused: %s", err);

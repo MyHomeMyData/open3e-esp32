@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "mqtt_pub.h"
 #include "poller.h"
 
 static const char *TAG = "grid";
@@ -58,6 +59,7 @@ static void grid_hold_task(void *arg)
             if (active) {
                 ESP_LOGI(TAG, "hold finished after %u writes", (unsigned)n_writes);
                 active = false;
+                grid_hold_publish();
             }
             continue;
         }
@@ -69,6 +71,11 @@ static void grid_hold_task(void *arg)
          * not -- it acknowledges the write and acts on it. */
         if (poller_write_now(e, GRID_HOLD_DID, json, true, err, sizeof(err))) {
             n_writes++;
+            /* Every fifth write, so the remaining time on a dashboard moves
+               without a message every two seconds. */
+            if (n_writes % 5 == 0) {
+                grid_hold_publish();
+            }
         } else {
             n_fails++;
             snprintf(last_error, sizeof(last_error), "%s", err);
@@ -77,6 +84,7 @@ static void grid_hold_task(void *arg)
                 ESP_LOGE(TAG, "giving up after %u failures", (unsigned)n_fails);
                 active = false;
             }
+            grid_hold_publish();
         }
     }
 }
@@ -123,6 +131,7 @@ bool grid_hold_start(uint16_t e, int16_t w, uint32_t seconds,
 
     ESP_LOGW(TAG, "holding 0x%03X.%u at %d W for %u s", e, GRID_HOLD_DID, w,
              (unsigned)seconds);
+    grid_hold_publish();
     return true;
 }
 
@@ -132,6 +141,52 @@ void grid_hold_stop(void)
         ESP_LOGI(TAG, "hold stopped after %u writes", (unsigned)n_writes);
     }
     active = false;
+    grid_hold_publish();
+}
+
+bool grid_hold_switch(bool on, char *err, size_t err_sz)
+{
+    if (!on) {
+        grid_hold_stop();
+        return true;
+    }
+    sys_cfg_t sys;
+    sys_cfg_get(&sys);
+    if (!sys.grid_ecu) {
+        snprintf(err, err_sz, "no storage ECU configured for grid charging");
+        return false;
+    }
+    /* The setting is positive and reads as "draw this much"; the datapoint
+     * wants a negative number for the same thing. */
+    return grid_hold_start(sys.grid_ecu, -(int16_t)sys.grid_watts,
+                           (uint32_t)sys.grid_minutes * 60, err, err_sz);
+}
+
+void grid_hold_publish(void)
+{
+    mqtt_cfg_t mq;
+    mqtt_cfg_get(&mq);
+    if (!mq.enabled || !mqtt_pub_connected()) {
+        return;
+    }
+    sys_cfg_t sys;
+    sys_cfg_get(&sys);
+
+    grid_hold_status_t st;
+    grid_hold_status(&st);
+
+    char topic[CFG_TOPIC_MAX + 8];
+    snprintf(topic, sizeof(topic), "%s/grid", mq.base_topic);
+
+    char payload[224];
+    snprintf(payload, sizeof(payload),
+             "{\"active\": %s, \"power\": %u, \"minutes\": %u, "
+             "\"remainingS\": %u, \"writes\": %u, \"failures\": %u}",
+             st.active ? "true" : "false",
+             (unsigned)sys.grid_watts, (unsigned)sys.grid_minutes,
+             (unsigned)st.remaining_s, (unsigned)st.writes,
+             (unsigned)st.failures);
+    mqtt_pub_raw(topic, payload, true);
 }
 
 void grid_hold_status(grid_hold_status_t *out)
