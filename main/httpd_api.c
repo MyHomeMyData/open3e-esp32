@@ -22,6 +22,7 @@
 #include "collect.h"
 #include "e3_scan.h"
 #include "em380.h"
+#include "grid_hold.h"
 #include "ha_disco.h"
 #include "mqtt_pub.h"
 #include "net_prov.h"
@@ -159,6 +160,8 @@ static esp_err_t h_status(httpd_req_t *r)
     mqtt_pub_stats(&mq);
     int ha_sensors = 0, ha_controls = 0;
     ha_disco_counts(&ha_sensors, &ha_controls);
+    grid_hold_status_t gh;
+    grid_hold_status(&gh);
     poller_stats(&poll);
     e3_scan_status(&scan);
     sys_cfg_get(&sys);
@@ -237,9 +240,13 @@ static esp_err_t h_status(httpd_req_t *r)
 
     snprintf(t, sizeof(t),
              "\"mqtt\": {\"connected\": %s, \"published\": %u, \"errors\": %u, "
-             "\"haSensors\": %d, \"haControls\": %d}, ",
+             "\"haSensors\": %d, \"haControls\": %d}, "
+             "\"grid\": {\"active\": %s, \"watts\": %d, \"remainingS\": %u, "
+             "\"writes\": %u, \"failures\": %u}, ",
              mq.connected ? "true" : "false", (unsigned)mq.published,
-             (unsigned)mq.errors, ha_sensors, ha_controls);
+             (unsigned)mq.errors, ha_sensors, ha_controls,
+             gh.active ? "true" : "false", gh.watts, (unsigned)gh.remaining_s,
+             (unsigned)gh.writes, (unsigned)gh.failures);
     o3e_buf_adds(&b, t);
 
     snprintf(t, sizeof(t),
@@ -723,6 +730,44 @@ static esp_err_t h_read(httpd_req_t *r)
     esp_err_t e = send_json(r, b.buf ? b.buf : "{}");
     o3e_buf_free(&b);
     return e;
+}
+
+/* Hold the grid setpoint. The caps live in grid_hold.c, not here: a limit
+ * that only the web interface enforces is not a limit. */
+static esp_err_t h_grid(httpd_req_t *r)
+{
+    char *body = read_body(r);
+    if (!body) {
+        return ESP_OK;
+    }
+    cJSON *j = cJSON_Parse(body);
+    free(body);
+    if (!j) {
+        return send_err(r, 400, "not valid JSON");
+    }
+    if (sel_bool(j, "stop", false)) {
+        cJSON_Delete(j);
+        grid_hold_stop();
+        return send_json(r, "{\"ok\": true}");
+    }
+    const cJSON *jw = cJSON_GetObjectItem(j, "watts");
+    if (!cJSON_IsNumber(jw)) {
+        cJSON_Delete(j);
+        return send_err(r, 400, "watts is required");
+    }
+    uint16_t ecu = sel_u16(j, "ecu", 0);
+    int16_t watts = (int16_t)jw->valuedouble;
+    uint32_t seconds = sel_u32(j, "seconds", 0);
+    cJSON_Delete(j);
+    if (!ecu) {
+        return send_err(r, 400, "ecu is required");
+    }
+
+    char err[128] = "";
+    if (!grid_hold_start(ecu, watts, seconds, err, sizeof(err))) {
+        return send_err(r, 400, err[0] ? err : "cannot start the hold");
+    }
+    return send_json(r, "{\"ok\": true}");
 }
 
 static esp_err_t h_write(httpd_req_t *r)
@@ -1649,6 +1694,7 @@ static const httpd_uri_t routes[] = {
     { "/api/points",      HTTP_PUT,  h_points_put,   NULL },
     { "/api/read",        HTTP_GET,  h_read,         NULL },
     { "/api/write",       HTTP_POST, h_write,        NULL },
+    { "/api/grid",        HTTP_POST, h_grid,         NULL },
     { "/api/trace",       HTTP_POST, h_trace_ctl,    NULL },
     { "/api/trace",       HTTP_GET,  h_trace_status, NULL },
     { "/api/trace/frames", HTTP_GET, h_trace_frames, NULL },

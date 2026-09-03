@@ -363,6 +363,48 @@ zurückbleiben.
 
 ---
 
+## Aus dem Netz laden (Vitocharge VX3)
+
+Auf einer Anlage aus Vitocal, Vitocharge VX3 und E380 schreibt der
+Energiemanager der Vitocal alle rund zehn Sekunden den Sollwert am
+Netzanschluss auf null — die gewöhnliche Eigenverbrauchsregelung. Sie läuft
+lokal und ist in der App nicht abschaltbar; alle Verwaltungsoptionen
+auszuschalten ändert nichts daran.
+
+Der Sollwert selbst lässt sich aber überschreiben:
+
+| | |
+|---|---|
+| Datenpunkt | DID **2188** `PointOfCommonCouplingSetActivePowerTotal` |
+| ECU | die Speichereinheit, dort `EMCUSLAVE` |
+| Format | 6 Byte: `int16` Leistung, dann `int32` = 120 |
+| Einheit | **Watt**, ohne Skalierung |
+| Vorzeichen | **negativ zieht aus dem Netz**, positiv speist ein |
+
+Die Datenbank führt den Punkt als `ro`; das Gerät sieht das anders und quittiert
+den Schreibbefehl. Gemessen: `-1000` ergab 1003 W Netzbezug und 1046 W mehr
+Ladeleistung, aufgebaut über etwa fünf Sekunden.
+
+Ein einzelner Schreibvorgang hält nur bis zur nächsten Auffrischung des
+Reglers. Deshalb *Debug → Aus dem Netz laden*: Leistung, Dauer, und die
+Firmware schreibt alle zwei Sekunden nach. Höchstens 6000 W und 60 Minuten je
+Anforderung.
+
+Über MQTT für den Betrieb an einem dynamischen Tarif:
+
+```json
+{"mode": "grid", "addr": "0x6A1", "watts": -2000, "seconds": 1800}
+{"mode": "grid", "stop": true}
+```
+
+**Es bleibt nichts zurück.** Zeitablauf, Neustart, Absturz, Stromausfall,
+abgezogenes Kabel — jedes davon beendet das Halten, und der Energiemanager hat
+den Sollwert binnen zehn Sekunden von selbst zurück. An der Anlage wird nichts
+verändert; das Gerät redet nur lauter als sie. Genau deshalb ist es so gebaut
+und nicht als dauerhafte Umkonfiguration.
+
+---
+
 ## Schreiben auf den Bus
 
 Zwei Sperren, weil am anderen Ende eine echte Heizung hängt:

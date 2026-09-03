@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "grid_hold.h"
 #include "mqtt_pub.h"
 #include "o3e_db.h"
 #include "poller.h"
@@ -95,6 +96,32 @@ static void do_read(uint16_t ecu, const cJSON *data)
                        e ? o3e_db_name(e) : "", "", NULL);
         mqtt_pub_raw(topic, json, false);
         free(json);
+    }
+}
+
+/* {"mode":"grid","addr":"0x6A1","watts":-2000,"seconds":1800}
+ * {"mode":"grid","stop":true}
+ *
+ * Negative watts draw from the grid. Reachable from MQTT on purpose, unlike
+ * forcing a single write: this is meant to be driven by a tariff, and it is
+ * bounded by its own caps and its own deadline rather than by who asked. The
+ * caps live in grid_hold.c; nothing here can widen them. */
+static void do_grid(uint16_t ecu, const cJSON *root)
+{
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "stop"))) {
+        grid_hold_stop();
+        return;
+    }
+    const cJSON *jw = cJSON_GetObjectItemCaseSensitive(root, "watts");
+    const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "seconds");
+    if (!cJSON_IsNumber(jw) || !cJSON_IsNumber(js)) {
+        reply_error("grid expects \"watts\" and \"seconds\", or \"stop\": true");
+        return;
+    }
+    char err[128] = "";
+    if (!grid_hold_start(ecu, (int16_t)jw->valuedouble,
+                         (uint32_t)js->valuedouble, err, sizeof(err))) {
+        reply_error("grid hold refused: %s", err);
     }
 }
 
@@ -206,6 +233,8 @@ static void execute(const char *payload)
         do_read(ecu, jdata);
     } else if (strcmp(mode->valuestring, "write") == 0) {
         do_write(ecu, jdata);
+    } else if (strcmp(mode->valuestring, "grid") == 0) {
+        do_grid(ecu, root);
     } else if (strcmp(mode->valuestring, "read-raw") == 0 ||
                strcmp(mode->valuestring, "write-raw") == 0) {
         /* open3e's raw modes exchange undecoded hex. Not implemented here:
@@ -213,7 +242,8 @@ static void execute(const char *payload)
          * the easiest way to put a heat pump into a state nobody intended. */
         reply_error("mode '%s' is not supported by this gateway", mode->valuestring);
     } else {
-        reply_error("bad mode '%s'; supported: read, write", mode->valuestring);
+        reply_error("bad mode '%s'; supported: read, write, grid",
+                    mode->valuestring);
     }
     cJSON_Delete(root);
 }

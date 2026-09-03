@@ -149,6 +149,18 @@ function renderStatus(s) {
 
   $("s-mqtt").textContent = s.mqtt.connected ? "verbunden" : "getrennt";
   $("s-pub").textContent = s.mqtt.published;
+  /* Shown wherever the page is, not only on the card: something that is
+     overriding the installation's own regulation should not be easy to
+     forget about. */
+  const g = s.grid || {};
+  const gs = $("gh-state");
+  if (gs) {
+    gs.textContent = g.active
+      ? `Aktiv: ${g.watts} W, noch ${fmtDuration(g.remainingS)}`
+        + ` · ${g.writes} Schreibvorgänge` + (g.failures ? `, ${g.failures} Fehler` : "")
+      : "Nicht aktiv — die Anlage regelt selbst.";
+    gs.style.color = g.active ? "var(--warn)" : "var(--muted)";
+  }
   /* Sensors and controls apart: a datapoint that is read-only and one whose
      control never got published look identical from the outside. */
   $("s-ha").textContent = s.mqtt.haSensors + s.mqtt.haControls
@@ -352,7 +364,7 @@ async function loadSystem() {
     list.append(t);
   }
 
-  for (const sel of [$("pt-ecu"), $("dbg-ecu")]) {
+  for (const sel of [$("pt-ecu"), $("dbg-ecu"), $("gh-ecu")]) {
     const prev = sel.value;
     sel.innerHTML = "";
     for (const d of system.devices || []) {
@@ -1487,6 +1499,27 @@ function initApp() {
   $("dbg-did").oninput = showTarget;
   $("dbg-ecu").onchange = showTarget;
   showTarget();
+
+  $("gh-start").onclick = async () => {
+    const watts = Number($("gh-watts").value);
+    const minutes = Number($("gh-min").value);
+    const what = watts < 0 ? `${-watts} W aus dem Netz ziehen`
+                           : `${watts} W ins Netz einspeisen`;
+    if (!confirm(`${what}, ${minutes} Minuten lang?\n\n`
+               + `Die Eigenverbrauchsregelung wird so lange überschrieben. `
+               + `Nach Ablauf übernimmt sie von selbst wieder.`)) return;
+    try {
+      await api("/api/grid", { method: "POST", body: JSON.stringify({
+        ecu: Number($("gh-ecu").value), watts, seconds: minutes * 60 }) });
+      toast("Halten gestartet.", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("gh-stop").onclick = async () => {
+    try {
+      await api("/api/grid", { method: "POST", body: JSON.stringify({ stop: true }) });
+      toast("Beendet.", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
 
   $("dbg-write").onclick = async () => {
     let value;
