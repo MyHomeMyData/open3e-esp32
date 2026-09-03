@@ -553,6 +553,14 @@
       ECU und die DID aus der Karte darüber. Der Wert muss die gleiche
       JSON-Struktur haben, die das Lesen liefert — erst lesen, dann anpassen.</p>
     <label><span>Wert (JSON)</span><input type="text" id="dbg-value" class="mono" placeholder='{"Setpoint": 52.0}'></label>
+    <label class="small" style="margin:0 0 10px"><input type="checkbox" id="dbg-force">
+      auch schreiben, wenn die Datenbank den Punkt als <b>nur lesbar</b> führt</label>
+    <p class="small muted" style="margin:0 0 12px">Das <span class="mono">acc</span>-Feld
+      ist open3es Kenntnisstand, keine Eigenschaft des Geräts — für manche Datenpunkte
+      hat es schlicht niemand versucht. Das Gerät setzt seinen eigenen Zugriffsschutz
+      durch und antwortet auf einen echten Schreibschutz mit einer Ablehnung, der
+      Fehlschlag ist also ungefährlich. Trotzdem: hier gehen Bytes an eine Heizung,
+      deren Bedeutung niemand aufgeschrieben hat.</p>
     <button class="btn danger" id="dbg-write">Schreiben</button>
     <p class="small muted" id="dbg-wstate" style="margin:10px 0 0"></p>
   </div>

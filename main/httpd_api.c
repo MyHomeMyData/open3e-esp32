@@ -746,10 +746,15 @@ static esp_err_t h_write(httpd_req_t *r)
     char *value = cJSON_PrintUnformatted(jval);
     uint16_t ecu = (uint16_t)jecu->valuedouble;
     uint16_t did = (uint16_t)jdid->valuedouble;
+    /* Read before the tree goes: everything below outlives it. Only the web
+       interface may force, and only when the request asks -- a person ticking
+       a labelled box is a decision, an automation sending the same JSON every
+       minute is not. */
+    bool force = sel_bool(j, "force", false);
     cJSON_Delete(j);
 
     char err[192] = "";
-    bool ok = value && poller_write_now(ecu, did, value, err, sizeof(err));
+    bool ok = value && poller_write_now(ecu, did, value, force, err, sizeof(err));
     free(value);
     if (!ok) {
         return send_err(r, 400, err[0] ? err : "write failed");

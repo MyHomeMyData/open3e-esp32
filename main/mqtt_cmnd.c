@@ -115,7 +115,10 @@ static void do_write(uint16_t ecu, const cJSON *data)
         if (!value) {
             continue;
         }
-        if (!poller_write_now(ecu, did, value, err, sizeof(err))) {
+        /* Never forced over MQTT: the command topic is where automations
+           live, and one of those repeating a mistake is worse than a person
+           making it once. */
+        if (!poller_write_now(ecu, did, value, false, err, sizeof(err))) {
             reply_error("write 0x%03X.%u failed: %s", ecu, did, err);
         } else {
             ESP_LOGI(TAG, "wrote 0x%03X.%u via MQTT", ecu, did);

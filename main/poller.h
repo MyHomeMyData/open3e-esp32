@@ -52,7 +52,17 @@ char *poller_read_now(uint16_t ecu, uint16_t did, char *err, size_t err_sz);
 
 /* Encode `value_json` for `did` and write it to the ECU. Refuses unless
  * writing is enabled in the system settings and the datapoint is marked rw. */
+/* `force` ignores the database's access flag.
+ *
+ * That flag is open3e's knowledge, not the device's: it says what the project
+ * has recorded about a datapoint, and nobody may ever have tried writing the
+ * one in front of you. The device enforces its own access and answers a
+ * genuine read-only write with a negative response, so the failure is safe --
+ * but the guard exists because sending bytes to a heat pump on a hunch is the
+ * mistake worth making hard, and forcing keeps it a deliberate act. The global
+ * write switch still applies. */
 bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
+                      bool force,
                       char *err, size_t err_sz);
 
 #endif /* O3E_POLLER_H */

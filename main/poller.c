@@ -354,7 +354,7 @@ static bool merge_current(const o3e_node_t *node, const uint8_t *raw, size_t n,
 }
 
 bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
-                      char *err, size_t err_sz)
+                      bool force, char *err, size_t err_sz)
 {
     sys_cfg_t sys;
     sys_cfg_get(&sys);
@@ -392,11 +392,15 @@ bool poller_write_now(uint16_t ecu, uint16_t did, const char *value_json,
     /* The database's own access flag is the second gate: the global switch says
      * writing is allowed at all, this says the datapoint accepts it. */
     if (node->acc != O3E_ACC_RW) {
-        snprintf(err, err_sz, "%s is read-only in the open3e database",
-                 node->id ? node->id : "this datapoint");
-        o3e_codec_free(node);
-        free(buf);
-        return false;
+        if (!force) {
+            snprintf(err, err_sz, "%s is read-only in the open3e database",
+                     node->id ? node->id : "this datapoint");
+            o3e_codec_free(node);
+            free(buf);
+            return false;
+        }
+        ESP_LOGW(TAG, "forcing a write to 0x%03X.%u (%s), which the database "
+                 "marks read-only", ecu, did, node->id ? node->id : "?");
     }
 
     cJSON *value = cJSON_Parse(value_json);

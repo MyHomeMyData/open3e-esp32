@@ -1492,12 +1492,15 @@ function initApp() {
     let value;
     try { value = JSON.parse($("dbg-value").value); }
     catch { return toast("Der Wert ist kein gültiges JSON.", "err"); }
-    if (!confirm(`DID ${$("dbg-did").value} auf ${$("dbg-value").value} schreiben?`)) return;
+    const force = $("dbg-force").checked;
+    if (!confirm(`DID ${$("dbg-did").value} auf ${$("dbg-value").value} schreiben?`
+                 + (force ? "\n\nDer Schreibschutz der Datenbank wird dabei übergangen."
+                          : ""))) return;
     try {
       await api("/api/write", {
         method: "POST",
         body: JSON.stringify({ ecu: Number($("dbg-ecu").value),
-                               did: Number($("dbg-did").value), value }),
+                               did: Number($("dbg-did").value), value, force }),
       });
       toast("Geschrieben.", "ok");
     } catch (e) { toast(e.message, "err"); }
