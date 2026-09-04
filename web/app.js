@@ -987,10 +987,22 @@ async function traceLoad() {
 
 async function loadCollect() {
   let c;
-  try { c = await api("/api/collect"); } catch { return; }
+  try {
+    c = await api("/api/collect");
+  } catch (e) {
+    /* Not swallowed: a dash with no reason reads the same as a quiet bus, and
+       the two want completely different things done about them. */
+    $("co-msgs").textContent = "Fehler";
+    $("co-bad").textContent = e.message;
+    $("co-msgs").style.color = "var(--err)";
+    return;
+  }
+  $("co-msgs").style.color = "";
 
-  $("co-msgs").textContent = c.messages ?? "–";
-  $("co-bad").textContent = c.incomplete ?? "–";
+  /* "aus" rather than 0: the receiver being switched off and the bus being
+     silent look identical in a counter, and only one of them is a setting. */
+  $("co-msgs").textContent = c.enabled ? (c.messages ?? 0) : "Empfang aus";
+  $("co-bad").textContent = c.enabled ? (c.incomplete ?? 0) : "–";
 
   const tbody = document.querySelector("#co-table tbody");
   tbody.innerHTML = "";

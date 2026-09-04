@@ -634,10 +634,11 @@ static esp_err_t h_collect(httpd_req_t *r)
     collect_stats_t st;
     collect_stats(&st);
 
-    collect_entry_t *e = malloc(sizeof(*e) * COLLECT_MAX_DIDS);
-    if (!e) {
-        return send_err(r, 500, "out of memory");
-    }
+    /* Static rather than a fresh 1.5 KiB of internal RAM on every poll of the
+     * page: the HTTP server runs one worker, so there is no second caller, and
+     * internal RAM is the scarce kind here. A failed allocation used to turn
+     * into a 500 that the page rendered as a dash. */
+    static collect_entry_t e[COLLECT_MAX_DIDS];
     size_t n = collect_entries(e, COLLECT_MAX_DIDS);
 
     o3e_buf_t b;
@@ -669,7 +670,6 @@ static esp_err_t h_collect(httpd_req_t *r)
         o3e_buf_addc(&b, '}');
     }
     o3e_buf_adds(&b, "]}");
-    free(e);
 
     esp_err_t rc = send_json(r, b.buf ? b.buf : "{}");
     o3e_buf_free(&b);
