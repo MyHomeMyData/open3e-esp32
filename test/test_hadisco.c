@@ -313,6 +313,9 @@ int main(int argc, char **argv)
         { "homeassistant/number/open3e_112233/grid_power/config",    "Leistung" },
         { "homeassistant/number/open3e_112233/grid_minutes/config",  "Dauer" },
         { "homeassistant/sensor/open3e_112233/grid_remaining/config","Restzeit" },
+        { "homeassistant/select/open3e_112233/storage_mode/config", "Betriebsart" },
+        { "homeassistant/sensor/open3e_112233/storage_remaining/config",
+          "Betriebsart Restzeit" },
     };
     for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
         m = find(want[i].topic);
@@ -327,7 +330,7 @@ int main(int argc, char **argv)
         }
         const cJSON *st = cJSON_GetObjectItem(j, "state_topic");
         ok("grid entity reads the hold's own topic",
-           cJSON_IsString(st) && strcmp(st->valuestring, "open3e-vent/grid") == 0,
+           cJSON_IsString(st) && strcmp(st->valuestring, "open3e-vent/hold") == 0,
            cJSON_IsString(st) ? st->valuestring : "(none)");
         /* Whatever the entity sends must be a command this gateway accepts. */
         for (const char *key = "payload_on";; key = "command_template") {
@@ -343,9 +346,13 @@ int main(int argc, char **argv)
                 cJSON *c = cJSON_Parse(filled);
                 ok("grid command renders to valid JSON", c != NULL, filled);
                 if (c) {
+                    /* Whichever entity it is, the command has to name a mode
+                       the command listener actually dispatches on. */
                     const cJSON *md = cJSON_GetObjectItem(c, "mode");
-                    ok("grid command carries mode=grid",
-                       cJSON_IsString(md) && strcmp(md->valuestring, "grid") == 0,
+                    ok("command names a mode this gateway dispatches",
+                       cJSON_IsString(md)
+                         && (strcmp(md->valuestring, "grid") == 0
+                          || strcmp(md->valuestring, "storage") == 0),
                        filled);
                     cJSON_Delete(c);
                 }
@@ -354,6 +361,18 @@ int main(int argc, char **argv)
                 break;
             }
         }
+        cJSON_Delete(j);
+    }
+
+    m = find("homeassistant/select/open3e_112233/storage_mode/config");
+    if (m) {
+        cJSON *j = cJSON_Parse(m->payload);
+        const cJSON *opts = j ? cJSON_GetObjectItem(j, "options") : NULL;
+        ok("storage mode offers all four states",
+           cJSON_IsArray(opts) && cJSON_GetArraySize(opts) == 4
+             && strcmp(cJSON_GetArrayItem(opts, 0)->valuestring, "normal") == 0
+             && strcmp(cJSON_GetArrayItem(opts, 1)->valuestring, "steht still") == 0,
+           m->payload);
         cJSON_Delete(j);
     }
 

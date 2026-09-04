@@ -12,7 +12,7 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
-#include "grid_hold.h"
+#include "hold.h"
 #include "mqtt_pub.h"
 #include "o3e_db.h"
 #include "poller.h"
@@ -141,7 +141,7 @@ static void do_grid(uint16_t ecu, const cJSON *root)
                 reply_error("grid hold refused: %s", err);
             }
         } else {
-            grid_hold_publish();
+            hold_publish();
         }
         return;
     }
@@ -168,6 +168,34 @@ static void do_grid(uint16_t ecu, const cJSON *root)
     if (!grid_hold_start(ecu, (int16_t)jw->valuedouble,
                          (uint32_t)js->valuedouble, err, sizeof(err))) {
         reply_error("grid hold refused: %s", err);
+    }
+}
+
+/* {"mode":"storage","addr":"0x6A1","storage":"steht still","seconds":1800}
+ *
+ * "normal" ends the hold and hands the limits back to the manager. The other
+ * three write only zero and the value the manager itself uses, so none of them
+ * needs the scale of that datapoint to be known. */
+static void do_storage(uint16_t ecu, const cJSON *root)
+{
+    const cJSON *jm = cJSON_GetObjectItemCaseSensitive(root, "storage");
+    storage_mode_t mode;
+    if (!cJSON_IsString(jm) || !storage_mode_parse(jm->valuestring, &mode)) {
+        reply_error("storage expects \"storage\": one of normal, steht still, "
+                    "nur laden, nur entladen");
+        return;
+    }
+    const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "seconds");
+    sys_cfg_t sys;
+    sys_cfg_get(&sys);
+    uint32_t seconds = cJSON_IsNumber(js) ? (uint32_t)js->valuedouble
+                                          : (uint32_t)sys.grid_minutes * 60;
+    if (!cJSON_GetObjectItemCaseSensitive(root, "addr") && sys.grid_ecu) {
+        ecu = sys.grid_ecu;
+    }
+    char err[128] = "";
+    if (!storage_hold_start(ecu, mode, seconds, err, sizeof(err))) {
+        reply_error("storage hold refused: %s", err);
     }
 }
 
@@ -281,6 +309,8 @@ static void execute(const char *payload)
         do_write(ecu, jdata);
     } else if (strcmp(mode->valuestring, "grid") == 0) {
         do_grid(ecu, root);
+    } else if (strcmp(mode->valuestring, "storage") == 0) {
+        do_storage(ecu, root);
     } else if (strcmp(mode->valuestring, "read-raw") == 0 ||
                strcmp(mode->valuestring, "write-raw") == 0) {
         /* open3e's raw modes exchange undecoded hex. Not implemented here:
@@ -288,7 +318,7 @@ static void execute(const char *payload)
          * the easiest way to put a heat pump into a state nobody intended. */
         reply_error("mode '%s' is not supported by this gateway", mode->valuestring);
     } else {
-        reply_error("bad mode '%s'; supported: read, write, grid",
+        reply_error("bad mode '%s'; supported: read, write, grid, storage",
                     mode->valuestring);
     }
     cJSON_Delete(root);

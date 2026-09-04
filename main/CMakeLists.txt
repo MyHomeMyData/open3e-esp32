@@ -4,7 +4,7 @@ idf_component_register(
         "app_config.c"
         "can_port.c"
         "collect.c"
-        "grid_hold.c"
+        "hold.c"
         "collect_parse.c"
         "cantrace.c"
         "e3_scan.c"

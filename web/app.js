@@ -161,6 +161,14 @@ function renderStatus(s) {
       : "Nicht aktiv — die Anlage regelt selbst.";
     gs.style.color = g.active ? "var(--warn)" : "var(--muted)";
   }
+  const ss = $("sh-state");
+  if (ss) {
+    const held = g.storage && g.storage !== "normal";
+    ss.textContent = held
+      ? `Aktiv: ${g.storage}, noch ${fmtDuration(g.storageRemainingS)}`
+      : "Nicht gehalten — der Manager entscheidet.";
+    ss.style.color = held ? "var(--warn)" : "var(--muted)";
+  }
   /* Sensors and controls apart: a datapoint that is read-only and one whose
      control never got published look identical from the outside. */
   $("s-ha").textContent = s.mqtt.haSensors + s.mqtt.haControls
@@ -1514,6 +1522,20 @@ function initApp() {
       toast("Halten gestartet.", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
+  $("sh-set").onclick = async () => {
+    const mode = $("sh-mode").value;
+    const minutes = Number($("sh-min").value);
+    if (mode !== "normal"
+        && !confirm(`Speicher auf "${mode}" setzen, ${minutes} Minuten lang?\n\n`
+                  + `Die Regelung der Anlage wird so lange überschrieben. `
+                  + `Nach Ablauf übernimmt sie von selbst wieder.`)) return;
+    try {
+      await api("/api/grid", { method: "POST", body: JSON.stringify({
+        ecu: Number($("gh-ecu").value), storage: mode, seconds: minutes * 60 }) });
+      toast("Gesetzt.", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
+
   $("gh-stop").onclick = async () => {
     try {
       await api("/api/grid", { method: "POST", body: JSON.stringify({ stop: true }) });

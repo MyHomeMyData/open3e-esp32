@@ -9,7 +9,7 @@
 #include "esp_mac.h"
 
 #include "app_config.h"
-#include "grid_hold.h"
+#include "hold.h"
 #include "mqtt_pub.h"
 #include "o3e_codec.h"
 #include "o3e_db.h"
@@ -681,7 +681,7 @@ static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     }
 
     char state[CFG_TOPIC_MAX + 8], lwt[CFG_TOPIC_MAX + 8];
-    snprintf(state, sizeof(state), "%s/grid", cfg->base_topic);
+    snprintf(state, sizeof(state), "%s/hold", cfg->base_topic);
     snprintf(lwt, sizeof(lwt), "%s/LWT", cfg->base_topic);
 
     o3e_buf_t b;
@@ -747,6 +747,22 @@ static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
     publish_grid_entity(cfg, dev_id, "sensor", "grid_remaining",
         "Netzladen Restzeit",
         "\"value_template\": \"{{ value_json.remainingS }}\", "
+        "\"unit_of_measurement\": \"s\", \"device_class\": \"duration\", "
+        "\"icon\": \"mdi:timer-sand\"", clear);
+
+    /* The storage's own limits, as a mode rather than two numbers: only the
+     * extremes are written, so there is nothing to dial. */
+    publish_grid_entity(cfg, dev_id, "select", "storage_mode",
+        "Speicher-Betriebsart",
+        "\"value_template\": \"{{ value_json.storage }}\", "
+        "\"command_template\": \"{\\\"mode\\\": \\\"storage\\\", "
+        "\\\"storage\\\": \\\"{{ value }}\\\"}\", "
+        "\"options\": [\"normal\", \"steht still\", \"nur laden\", "
+        "\"nur entladen\"], \"icon\": \"mdi:battery-lock\"", clear);
+
+    publish_grid_entity(cfg, dev_id, "sensor", "storage_remaining",
+        "Speicher-Betriebsart Restzeit",
+        "\"value_template\": \"{{ value_json.storageRemainingS }}\", "
         "\"unit_of_measurement\": \"s\", \"device_class\": \"duration\", "
         "\"icon\": \"mdi:timer-sand\"", clear);
 }

@@ -588,6 +588,26 @@
       startet das Gerät neu oder fällt der Strom aus, hört das Halten auf und
       die Anlage regelt binnen zehn Sekunden von selbst weiter.</p>
     <p class="small" id="gh-state" style="margin:10px 0 0"></p>
+
+    <h2 style="margin-top:26px">Speicher-Betriebsart</h2>
+    <p class="hint">Hält die Lade- und Entladegrenzen des Speichers (DID 2226)
+      gegen dieselbe Regelung. Geschrieben werden nur die Extremwerte — null
+      und das, was der Manager selbst setzt —, deshalb muss niemand die Skala
+      dieses Datenpunkts kennen.</p>
+    <div class="row">
+      <label><span>Betriebsart</span>
+        <select id="sh-mode" style="width:190px">
+          <option value="normal">normal (Manager entscheidet)</option>
+          <option value="steht still">steht still</option>
+          <option value="nur laden">nur laden, gibt nichts ab</option>
+          <option value="nur entladen">nur entladen, lädt nicht</option>
+        </select></label>
+      <label><span>Dauer (Minuten)</span>
+        <input type="number" id="sh-min" value="15" min="1" max="60"
+               style="width:110px"></label>
+      <button class="btn danger" id="sh-set" style="flex:0 0 auto">Setzen</button>
+    </div>
+    <p class="small" id="sh-state" style="margin:10px 0 0"></p>
   </div>
 
   <div class="card">

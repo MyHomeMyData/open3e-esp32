@@ -22,7 +22,7 @@
 #include "collect.h"
 #include "e3_scan.h"
 #include "em380.h"
-#include "grid_hold.h"
+#include "hold.h"
 #include "ha_disco.h"
 #include "mqtt_pub.h"
 #include "net_prov.h"
@@ -162,6 +162,8 @@ static esp_err_t h_status(httpd_req_t *r)
     ha_disco_counts(&ha_sensors, &ha_controls);
     grid_hold_status_t gh;
     grid_hold_status(&gh);
+    storage_hold_status_t sh;
+    storage_hold_status(&sh);
     poller_stats(&poll);
     e3_scan_status(&scan);
     sys_cfg_get(&sys);
@@ -242,11 +244,13 @@ static esp_err_t h_status(httpd_req_t *r)
              "\"mqtt\": {\"connected\": %s, \"published\": %u, \"errors\": %u, "
              "\"haSensors\": %d, \"haControls\": %d}, "
              "\"grid\": {\"active\": %s, \"watts\": %d, \"remainingS\": %u, "
-             "\"writes\": %u, \"failures\": %u}, ",
+             "\"writes\": %u, \"failures\": %u, \"storage\": \"%s\", "
+             "\"storageRemainingS\": %u}, ",
              mq.connected ? "true" : "false", (unsigned)mq.published,
              (unsigned)mq.errors, ha_sensors, ha_controls,
              gh.active ? "true" : "false", gh.watts, (unsigned)gh.remaining_s,
-             (unsigned)gh.writes, (unsigned)gh.failures);
+             (unsigned)gh.writes, (unsigned)gh.failures,
+             storage_mode_name(sh.mode), (unsigned)sh.remaining_s);
     o3e_buf_adds(&b, t);
 
     snprintf(t, sizeof(t),
@@ -750,6 +754,25 @@ static esp_err_t h_grid(httpd_req_t *r)
         grid_hold_stop();
         return send_json(r, "{\"ok\": true}");
     }
+    /* The storage's own limits ride on the same endpoint: same target, same
+       deadline, same way of ending. */
+    const cJSON *jsm = cJSON_GetObjectItem(j, "storage");
+    if (cJSON_IsString(jsm)) {
+        storage_mode_t mode;
+        if (!storage_mode_parse(jsm->valuestring, &mode)) {
+            cJSON_Delete(j);
+            return send_err(r, 400, "unknown storage mode");
+        }
+        uint16_t secu = sel_u16(j, "ecu", 0);
+        uint32_t ssec = sel_u32(j, "seconds", 0);
+        cJSON_Delete(j);
+        char serr[128] = "";
+        if (!storage_hold_start(secu, mode, ssec ? ssec : 900, serr, sizeof(serr))) {
+            return send_err(r, 400, serr[0] ? serr : "cannot set the storage mode");
+        }
+        return send_json(r, "{\"ok\": true}");
+    }
+
     const cJSON *jw = cJSON_GetObjectItem(j, "watts");
     if (!cJSON_IsNumber(jw)) {
         cJSON_Delete(j);
@@ -776,7 +799,7 @@ static esp_err_t h_grid(httpd_req_t *r)
     sys.grid_watts = (uint16_t)(watts < 0 ? -watts : watts);
     sys.grid_minutes = (uint16_t)((seconds + 59) / 60);
     sys_cfg_set(&sys);
-    grid_hold_publish();
+    hold_publish();
     return send_json(r, "{\"ok\": true}");
 }
 
