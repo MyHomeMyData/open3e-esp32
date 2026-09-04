@@ -670,6 +670,7 @@ static esp_err_t h_collect(httpd_req_t *r)
         o3e_buf_addc(&b, '}');
     }
     o3e_buf_adds(&b, "]}");
+    collect_entries_free(e, n);
 
     esp_err_t rc = send_json(r, b.buf ? b.buf : "{}");
     o3e_buf_free(&b);

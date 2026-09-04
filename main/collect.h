@@ -86,4 +86,9 @@ void collect_reload(void);
 /* Snapshot of what has been seen, most recent first. */
 size_t collect_entries(collect_entry_t *out, size_t max);
 
+/* Releases the strings collect_entries() copied. Copies, because the decode
+ * task frees the originals as soon as the next message for that datapoint
+ * arrives. */
+void collect_entries_free(collect_entry_t *e, size_t n);
+
 #endif /* O3E_COLLECT_H */

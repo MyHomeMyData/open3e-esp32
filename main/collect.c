@@ -468,9 +468,25 @@ size_t collect_entries(collect_entry_t *out, size_t max)
         out[i].len = entries[i].len;
         out[i].count = entries[i].count;
         out[i].last_ms = entries[i].last_ms;
-        out[i].name = entries[i].codec ? entries[i].codec->id : NULL;
-        out[i].json = entries[i].json;
+        /* Copied, not borrowed. The decode task frees and replaces both of
+         * these on every message that arrives -- eight a second on a
+         * Vitocharge bus -- so a pointer handed out under the lock is dangling
+         * by the time the caller has finished formatting with it. That is a
+         * use-after-free, and it read as the device rebooting whenever the
+         * page was opened. em380.c had it right; this did not. */
+        const char *nm = entries[i].codec ? entries[i].codec->id : NULL;
+        out[i].name = nm ? strdup(nm) : NULL;
+        out[i].json = entries[i].json ? strdup(entries[i].json) : NULL;
     }
     xSemaphoreGive(entries_lock);
     return n;
+}
+
+void collect_entries_free(collect_entry_t *e, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        free((char *)e[i].name);
+        free((char *)e[i].json);
+        e[i].name = e[i].json = NULL;
+    }
 }
