@@ -119,7 +119,9 @@ static void hold_task(void *arg)
     (void)arg;
     uint32_t turns = 0;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(HOLD_PERIOD_MS));
+        /* Woken either by the heartbeat or, sooner, by the manager writing one
+         * of the held datapoints. The timeout is the floor, not the cadence. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(HOLD_PERIOD_MS));
         bool any = false;
 
         for (int i = 0; i < N_SLOTS; i++) {
@@ -193,6 +195,28 @@ static bool ensure_task(char *err, size_t err_sz)
         return false;
     }
     return true;
+}
+
+void hold_note_foreign(uint16_t did)
+{
+    /* Called for every message the collect receiver decodes -- eight a second
+     * on a Vitocharge bus -- so the two datapoints this could possibly concern
+     * are ruled out before touching the lock the writer holds. */
+    if ((did != GRID_HOLD_DID && did != STORAGE_HOLD_DID) || !lock || !task_h) {
+        return;
+    }
+    bool ours = false;
+    xSemaphoreTake(lock, portMAX_DELAY);
+    for (int i = 0; i < N_SLOTS; i++) {
+        if (slots[i].active && slots[i].did == did) {
+            ours = true;
+            break;
+        }
+    }
+    xSemaphoreGive(lock);
+    if (ours) {
+        xTaskNotifyGive(task_h);
+    }
 }
 
 /* ------------------------------------------------------------------ */

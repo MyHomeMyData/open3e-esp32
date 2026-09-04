@@ -112,6 +112,19 @@ void storage_hold_status(storage_hold_status_t *out);
 const char *storage_mode_name(storage_mode_t mode);
 bool storage_mode_parse(const char *name, storage_mode_t *out);
 
+/* Tell the holder that the manager has just written this datapoint.
+ *
+ * Without it the two sides take turns on a timer: the manager sets its value,
+ * and up to two seconds pass before the next scheduled rewrite takes it back.
+ * The installation follows whichever is current, so the delivered power
+ * wanders back and forth once every nine seconds -- small, but visible, and
+ * pointless. The manager announces every write on its broadcast channel, which
+ * the collect receiver already decodes, so the rewrite can follow it by a few
+ * milliseconds instead of by a timer.
+ *
+ * Safe to call from the collect task; it only wakes the holder. */
+void hold_note_foreign(uint16_t did);
+
 /* Publish both holds to <base>/hold, retained. Called on every change and
  * regularly while one runs, so a subscriber that connects late still learns
  * that something is overriding the installation's own regulation. */

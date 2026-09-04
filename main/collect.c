@@ -16,6 +16,7 @@
 #include "app_config.h"
 #include "can_port.h"
 #include "cantrace.h"
+#include "hold.h"
 #include "mqtt_pub.h"
 #include "o3e_codec.h"
 #include "o3e_db.h"
@@ -175,6 +176,11 @@ static void remember(const collect_msg_t *m, uint32_t now)
  * learns the current state. */
 static void watch_control(const collect_msg_t *m, const char *json)
 {
+    /* Before the change test, and regardless of it: the manager writes the
+     * same value over and over, so nothing here changes, yet each of those
+     * writes is exactly what a running hold has to answer. */
+    hold_note_foreign(m->did);
+
     ctrl_t *c = NULL;
     for (size_t i = 0; i < N_CONTROLS; i++) {
         if (controls[i].did == m->did) {
