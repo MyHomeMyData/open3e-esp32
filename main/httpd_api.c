@@ -641,40 +641,55 @@ static esp_err_t h_collect(httpd_req_t *r)
     static collect_entry_t e[COLLECT_MAX_DIDS];
     size_t n = collect_entries(e, COLLECT_MAX_DIDS);
 
-    o3e_buf_t b;
-    o3e_buf_init(&b);
+    /* Streamed, not assembled.
+     *
+     * On a Vitocharge bus this answer is around fifteen kilobytes: 43
+     * datapoints, one of them decoding to a value of 1.5 KiB on its own. A
+     * doubling buffer reaches that through 1, 2, 4, 8, 16 KiB, and the last
+     * step needs the old and the new alive at once -- some 24 KiB, all of it
+     * internal RAM, because allocations below 16 KiB never go to PSRAM here.
+     * The request simply died. Sent in pieces there is no large buffer at all,
+     * and the peak is the longest single value. */
+    httpd_resp_set_type(r, "application/json");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-cache");
+
     char t[192];
     snprintf(t, sizeof(t),
              "{\"enabled\": %s, \"messages\": %u, \"incomplete\": %u, "
              "\"published\": %u, \"canIds\": [",
              st.enabled ? "true" : "false", (unsigned)st.messages,
              (unsigned)st.incomplete, (unsigned)st.published);
-    o3e_buf_adds(&b, t);
+    send_chunk_str(r, t);
     for (uint8_t k = 0; k < st.n_ids; k++) {
         snprintf(t, sizeof(t), "%s\"0x%03X\"", k ? "," : "", st.can_ids[k]);
-        o3e_buf_adds(&b, t);
+        send_chunk_str(r, t);
     }
-    o3e_buf_adds(&b, "], \"dids\": [");
+    send_chunk_str(r, "], \"dids\": [");
 
-    for (size_t i = 0; i < n; i++) {
+    esp_err_t rc = ESP_OK;
+    for (size_t i = 0; i < n && rc == ESP_OK; i++) {
         /* Name and value were produced when the message arrived; this handler
          * only formats them. */
-        snprintf(t, sizeof(t), "%s{\"did\": %u, \"len\": %u, \"count\": %u, \"name\": ",
-                 i ? ", " : "", e[i].did, e[i].len, (unsigned)e[i].count);
-        o3e_buf_adds(&b, t);
-        o3e_buf_add_json_str(&b, e[i].name ? e[i].name : "");
-        if (e[i].json) {
-            o3e_buf_adds(&b, ", \"value\": ");
-            o3e_buf_adds(&b, e[i].json);
+        snprintf(t, sizeof(t), "%s{\"did\": %u, \"len\": %u, \"count\": %u, \"name\": \"%s\"",
+                 i ? ", " : "", e[i].did, e[i].len, (unsigned)e[i].count,
+                 e[i].name ? e[i].name : "");
+        rc = send_chunk_str(r, t);
+        if (rc == ESP_OK && e[i].json) {
+            rc = send_chunk_str(r, ", \"value\": ");
+            if (rc == ESP_OK) {
+                rc = send_chunk_str(r, e[i].json);
+            }
         }
-        o3e_buf_addc(&b, '}');
+        if (rc == ESP_OK) {
+            rc = send_chunk_str(r, "}");
+        }
     }
-    o3e_buf_adds(&b, "]}");
     collect_entries_free(e, n);
-
-    esp_err_t rc = send_json(r, b.buf ? b.buf : "{}");
-    o3e_buf_free(&b);
-    return rc;
+    if (rc != ESP_OK) {
+        return ESP_FAIL;
+    }
+    send_chunk_str(r, "]}");
+    return httpd_resp_send_chunk(r, NULL, 0);
 }
 
 static esp_err_t h_points_get(httpd_req_t *r)
