@@ -4,10 +4,13 @@ Referenz für die Umsetzung auf feature/raw-gateway in beiden Repos. Details
 der konkreten Implementierung stimmen wir bei Bedarf später mit boonkerz ab.
 
 **Umsetzungsstand:** Abschnitt 1 (REST rawread/rawwrite, ohne Service 0x77)
-und der `rawApiVersion`/`rawWriteEnabled`-Teil von Abschnitt 3 sind im
-Firmware-Code umgesetzt, aber noch nicht kompiliert/geflasht getestet (kein
-ESP-IDF-Toolchain verfügbar). Abschnitt 2 (Raw-MQTT-Topic für Collect/E380)
-und der Push-Teil von Abschnitt 3 (retained `open3e/status`) sind noch offen.
+und der `rawApiVersion`/`rawWriteEnabled`-Teil von Abschnitt 3 sind
+implementiert, geflasht und **Ende-zu-Ende gegen die Simulator-Umgebung
+verifiziert** (`GET /api/rawread` gelesen, `rawWriteEnabled` per
+`/api/settings` gesetzt, `POST /api/rawwrite` auf DID 396 geschrieben,
+Little-Endian-Kodierung über Rücklesen bestätigt). Abschnitt 2
+(Raw-MQTT-Topic für Collect/E380) und der Push-Teil von Abschnitt 3
+(retained `open3e/status`) sind noch offen.
 
 ## 1. UDS Lesen/Schreiben (REST)
 
