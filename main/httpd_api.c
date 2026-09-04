@@ -20,6 +20,7 @@
 #include "can_port.h"
 #include "cantrace.h"
 #include "collect.h"
+#include "crashlog.h"
 #include "e3_scan.h"
 #include "em380.h"
 #include "hold.h"
@@ -690,6 +691,18 @@ static esp_err_t h_collect(httpd_req_t *r)
     }
     send_chunk_str(r, "]}");
     return httpd_resp_send_chunk(r, NULL, 0);
+}
+
+/* Why the device last restarted, and where it crashed if it did. */
+static esp_err_t h_crash(httpd_req_t *r)
+{
+    if (r->method == HTTP_DELETE) {
+        return crashlog_clear() ? send_json(r, "{\"ok\": true}")
+                                : send_err(r, 500, "cannot erase the core dump");
+    }
+    char out[768];
+    crashlog_json(out, sizeof(out));
+    return send_json(r, out);
 }
 
 static esp_err_t h_points_get(httpd_req_t *r)
@@ -1744,6 +1757,8 @@ static const httpd_uri_t routes[] = {
     { "/api/read",        HTTP_GET,  h_read,         NULL },
     { "/api/write",       HTTP_POST, h_write,        NULL },
     { "/api/grid",        HTTP_POST, h_grid,         NULL },
+    { "/api/crash",       HTTP_GET,  h_crash,        NULL },
+    { "/api/crash",       HTTP_DELETE, h_crash,      NULL },
     { "/api/trace",       HTTP_POST, h_trace_ctl,    NULL },
     { "/api/trace",       HTTP_GET,  h_trace_status, NULL },
     { "/api/trace/frames", HTTP_GET, h_trace_frames, NULL },

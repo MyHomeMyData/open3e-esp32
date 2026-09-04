@@ -47,3 +47,13 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Reading a heat pump over CAN is not latency critical, but a wedged bus should
 # never take the whole device down.
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# Crash reports survive the reboot.
+#
+# Without this a panic leaves nothing behind: the device comes back up and the
+# only evidence is that the uptime restarted. With it the cause, the faulting
+# task and a backtrace are readable afterwards over the web interface. ESP-IDF
+# v6 writes the ELF format and a CRC32 unconditionally, so neither needs
+#selecting; 1792 is the smallest stack the panic handler accepts.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_STACK_SIZE=1792

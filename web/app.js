@@ -1244,6 +1244,14 @@ function initApp() {
   $("em-only-seen").onchange = () => loadMeter().catch(() => {});
 
   $("set-save").onclick = saveSettings;
+  $("crash-clear").onclick = async () => {
+    try {
+      await api("/api/crash", { method: "DELETE" });
+      $("crash-box").hidden = true;
+      toast("Verworfen.", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
+
   $("dev-restart").onclick = async () => {
     if (!confirm("Gerät neu starten?")) return;
     await api("/api/restart", { method: "POST" }).catch(() => {});
@@ -1574,11 +1582,33 @@ function initApp() {
   };
 
   loadNames().then(loadPoints).then(loadSystem).then(loadMeter).then(loadCollect);
+  loadCrash();
   loadSysinfo();
   loadSettings().catch(() => {});
 }
 
 /* ------------------------------------------------------------------ */
+
+/* Read once per page load, not per poll: it only changes across a reboot,
+   and a reboot reloads the page anyway. */
+async function loadCrash() {
+  let c;
+  try { c = await api("/api/crash"); } catch { return; }
+  $("s-reset").textContent = c.reason || "–";
+  const box = $("crash-box");
+  if (!c.dump) { box.hidden = true; return; }
+  box.hidden = false;
+  const d = c.dump;
+  $("crash-info").innerHTML = "";
+  const line = (k, v) => el("div", {}, el("span", { className: "muted",
+                             textContent: k + ": " }), el("span", { textContent: v }));
+  $("crash-info").append(
+    line("Task", d.task),
+    line("Programmzähler", d.pc),
+    line("Ursache", `${d.cause}, Adresse ${d.vaddr}`),
+    line("Build", d.elfSha),
+    line("Rückverfolgung", (d.bt || []).join(" ") + (d.corrupted ? "  (unvollständig)" : "")));
+}
 
 async function poll() {
   try {

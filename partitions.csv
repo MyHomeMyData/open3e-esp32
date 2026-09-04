@@ -13,3 +13,10 @@ ota_0,      app,  ota_0,    0x20000,  0x400000,
 ota_1,      app,  ota_1,    0x420000, 0x400000,
 # LittleFS uses the "spiffs" data subtype; ESP-IDF has no separate one for it.
 storage,    data, spiffs,   0x820000, 0x400000,
+# Appended at the very end, so nothing before it moves: the stored
+# configuration and the datapoint database survive adding it. On a crash the
+# panic handler writes registers, the faulting task's stack and a backtrace
+# here, and the firmware reads them back afterwards -- which is the difference
+# between diagnosing a reboot over the web interface and needing a cable and a
+# serial monitor on a device mounted in a boiler room.
+coredump,   data, coredump, 0xC20000, 0x10000,

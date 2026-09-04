@@ -142,6 +142,21 @@
       <div class="kv"><div class="k">Version</div><div class="v" id="s-fw">–</div></div>
       <div class="kv"><div class="k">open3e-Datenbank</div><div class="v" id="s-db">–</div></div>
     </div>
+    <div class="kv" style="margin-top:12px"><div class="k">Letzter Neustart</div>
+      <div class="v" id="s-reset">–</div></div>
+    <div id="crash-box" hidden style="margin-top:12px">
+      <div class="warnbox">
+        <b>Die letzte Sitzung endete mit einem Absturz.</b>
+        <div class="mono small" id="crash-info" style="margin-top:8px"></div>
+        <p class="small" style="margin:10px 0 0">Die Adressen sind ohne die
+          zugehörige ELF-Datei nicht lesbar. Mit dem passenden Build auflösen:
+          <span class="mono">xtensa-esp32s3-elf-addr2line -pfiaC -e
+          build/open3e-gateway.elf &lt;Adressen&gt;</span> — die Build-Kennung
+          im Bericht muss dabei mit der oben angezeigten übereinstimmen.</p>
+        <button class="btn sec small" id="crash-clear"
+                style="margin-top:10px">Bericht verwerfen</button>
+      </div>
+    </div>
     <p class="hint" style="margin:12px 0 0">Die <b>Build-Kennung</b> sind die ersten
       acht Zeichen der ELF-Prüfsumme — sie ändert sich bei jedem geänderten Byte
       Code. Zum Vergleichen lokal <span class="mono">make fwinfo</span> aufrufen:

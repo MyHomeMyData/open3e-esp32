@@ -4,6 +4,7 @@ idf_component_register(
         "app_config.c"
         "can_port.c"
         "collect.c"
+        "crashlog.c"
         "hold.c"
         "collect_parse.c"
         "cantrace.c"
@@ -34,6 +35,7 @@ idf_component_register(
         nvs_flash
         app_update
     PRIV_REQUIRES
+        espcoredump
         espressif__cjson
         espressif__mqtt
         joltwallet__littlefs
