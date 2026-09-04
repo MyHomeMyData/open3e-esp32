@@ -53,6 +53,13 @@ typedef struct {
     /* Writing to a heat pump is off until deliberately enabled; a datapoint
      * additionally has to be marked rw in the open3e database. */
     bool write_enabled;
+    /* Separate from write_enabled on purpose: /api/rawwrite bypasses the
+     * open3e database entirely -- no rw check, and unlike a decoded write it
+     * accepts a DID this firmware's own database does not even know about.
+     * That is a materially bigger trust step than the decoded path, so it
+     * gets its own explicit opt-in rather than riding along with
+     * write_enabled. */
+    bool raw_write_enabled;
     /* Passive reception of the E380 energy meter. Off by default: most
      * installations have no meter, and an unused listener is one more thing
      * running in the receive interrupt. */
