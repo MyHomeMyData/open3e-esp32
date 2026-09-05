@@ -20,6 +20,10 @@
 #define CFG_SSID_MAX     33
 #define CFG_PASS_MAX     64
 #define CFG_TOPIC_MAX   128
+/* Sized for RAW_RELAY_MAX_IDS (raw_relay.h) comma-separated "0x7FF" entries:
+ * 32 * strlen("0x7FF,") + 1, rounded up. CFG_STR_MAX is too small once a
+ * caller relays both energy meters plus a handful of collect IDs. */
+#define CFG_RAW_IDS_MAX 256
 
 /* Files on the storage partition. */
 #define CFG_MOUNT        "/data"
@@ -76,7 +80,7 @@ typedef struct {
      * points.json - see raw_relay.h. Empty by default (off); unrelated to
      * collect_canids/em380_enabled above, which publish this firmware's own
      * decoded view of the same kind of broadcast traffic. */
-    char raw_canids[CFG_STR_MAX];
+    char raw_canids[CFG_RAW_IDS_MAX];
     char tz[CFG_STR_MAX];   /* POSIX TZ, default "CET-1CEST,M3.5.0,M10.5.0/3" */
     /* What a bare "start charging" means: which storage unit, how much, and
      * for how long. Kept as settings rather than passed with every command so

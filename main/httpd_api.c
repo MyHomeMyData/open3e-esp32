@@ -1673,7 +1673,7 @@ static esp_err_t h_settings_put(httpd_req_t *r)
             sys.collect_enabled = cJSON_IsTrue(v);
         }
         copy_str(js, "collectCanIds", sys.collect_canids, sizeof(sys.collect_canids));
-        char raw_ids_was[CFG_STR_MAX];
+        char raw_ids_was[CFG_RAW_IDS_MAX];
         snprintf(raw_ids_was, sizeof(raw_ids_was), "%s", sys.raw_canids);
         copy_str(js, "rawCanIds", sys.raw_canids, sizeof(sys.raw_canids));
         copy_str(js, "tz", sys.tz, sizeof(sys.tz));
