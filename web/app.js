@@ -1616,8 +1616,10 @@ async function poll() {
     renderStatus(s);
     renderScan(s.scan);
     if ($("tab-meter").classList.contains("active")) {
-      loadMeter().catch(() => {});
-      loadCollect().catch(() => {});
+      /* One after the other, not both at once: this tab produces the two
+         largest answers the device has, and asking for them in parallel is
+         what pushed the connection count over the edge. */
+      loadMeter().then(loadCollect).catch(() => {});
     }
     /* Only while the status page is open: the snapshot walks every task. */
     if ($("tab-status").classList.contains("active")) {

@@ -76,7 +76,65 @@ static void restart_soon(uint32_t delay_ms)
  * browser then silently had no datapoint names and blamed the database. */
 static esp_err_t send_chunk_str(httpd_req_t *r, const char *s)
 {
-    return httpd_resp_send_chunk(r, s, strlen(s));
+    size_t n = strlen(s);
+    /* A zero-length chunk is how the protocol says "response finished". Sent
+     * by accident in the middle, it ends the body early and every later chunk
+     * fails -- so an empty string is nothing, not a terminator. */
+    return n ? httpd_resp_send_chunk(r, s, n) : ESP_OK;
+}
+
+/* Collects output and sends it in a few large pieces instead of many small
+ * ones.
+ *
+ * The collect answer is some fifteen kilobytes across a hundred and thirty
+ * fragments. Each fragment is its own send on a socket whose buffer is under
+ * six kilobytes, and a send that cannot complete is an error the handler has
+ * to abandon the response on. Buffering to a page at a time keeps the memory
+ * bounded -- the point of streaming in the first place -- while asking far
+ * less of the connection. */
+typedef struct {
+    httpd_req_t *req;
+    char         buf[1024];
+    size_t       len;
+    esp_err_t    err;
+} chunker_t;
+
+static void chunker_init(chunker_t *c, httpd_req_t *r)
+{
+    c->req = r;
+    c->len = 0;
+    c->err = ESP_OK;
+}
+
+static esp_err_t chunker_flush(chunker_t *c)
+{
+    if (c->err == ESP_OK && c->len) {
+        c->err = httpd_resp_send_chunk(c->req, c->buf, c->len);
+        if (c->err != ESP_OK) {
+            ESP_LOGW(TAG, "chunk of %u bytes failed: %s",
+                     (unsigned)c->len, esp_err_to_name(c->err));
+        }
+    }
+    c->len = 0;
+    return c->err;
+}
+
+static esp_err_t chunker_add(chunker_t *c, const char *s)
+{
+    while (c->err == ESP_OK && *s) {
+        size_t room = sizeof(c->buf) - c->len;
+        size_t n = strlen(s);
+        if (n > room) {
+            n = room;
+        }
+        memcpy(c->buf + c->len, s, n);
+        c->len += n;
+        s += n;
+        if (c->len == sizeof(c->buf)) {
+            chunker_flush(c);
+        }
+    }
+    return c->err;
 }
 
 static esp_err_t send_json(httpd_req_t *r, const char *json)
@@ -1785,6 +1843,16 @@ bool httpd_api_start(void)
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.max_uri_handlers = N_ROUTES;
     cfg.stack_size = 8192;
+    /* Four usable connections is the default (seven, three reserved), and the
+     * pages here ask for several at once while the browser keeps each alive.
+     * With purging on, the fifth request closes the oldest -- which lands on
+     * whichever answer is slowest to produce, and that is the broadcast
+     * channel's fifteen kilobytes. It failed in a browser and succeeded from
+     * curl, because curl asks one thing at a time. LWIP allows ten sockets in
+     * this build; leaving one spare keeps the failure from simply moving. */
+    cfg.max_open_sockets = 9;
+    /* Still on: running out should cost the oldest idle connection, not the
+     * ability to answer at all. */
     cfg.lru_purge_enable = true;
     /* A firmware upload is over a megabyte across a shared 2.4 GHz link; the
      * default 5 s socket timeout gives up long before it finishes. */
