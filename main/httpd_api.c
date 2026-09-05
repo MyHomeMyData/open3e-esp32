@@ -1837,20 +1837,30 @@ static const httpd_uri_t routes[] = {
 
 #define N_ROUTES (sizeof(routes) / sizeof(routes[0]))
 
+/* Checked here rather than discovered on the device: exceeding the budget does
+ * not degrade anything, it stops the server starting, and a gateway with no web
+ * interface can only be recovered over a cable. */
+#define HTTPD_CLIENT_SOCKETS 12
+_Static_assert(CONFIG_LWIP_MAX_SOCKETS >= HTTPD_CLIENT_SOCKETS + 3,
+               "LWIP_MAX_SOCKETS must leave room for the HTTP server's own three");
+
 bool httpd_api_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.max_uri_handlers = N_ROUTES;
     cfg.stack_size = 8192;
-    /* Four usable connections is the default (seven, three reserved), and the
-     * pages here ask for several at once while the browser keeps each alive.
-     * With purging on, the fifth request closes the oldest -- which lands on
-     * whichever answer is slowest to produce, and that is the broadcast
-     * channel's fifteen kilobytes. It failed in a browser and succeeded from
-     * curl, because curl asks one thing at a time. LWIP allows ten sockets in
-     * this build; leaving one spare keeps the failure from simply moving. */
-    cfg.max_open_sockets = 9;
+    /* Chrome opens up to six connections to one host and keeps them alive, so
+     * the browser alone can reach the default limit of seven; the next request
+     * then closes the oldest, which lands on whichever answer took longest to
+     * produce -- the broadcast channel's fifteen kilobytes. It failed in a
+     * browser and succeeded from curl, because curl asks one thing at a time.
+     *
+     * This counts client connections only; three more are the server's own,
+     * and the sum may not exceed LWIP_MAX_SOCKETS. That is raised to sixteen
+     * in sdkconfig.defaults -- setting this alone stops the server starting at
+     * all, which is a worse failure than the one it was meant to fix. */
+    cfg.max_open_sockets = HTTPD_CLIENT_SOCKETS;
     /* Still on: running out should cost the oldest idle connection, not the
      * ability to answer at all. */
     cfg.lru_purge_enable = true;

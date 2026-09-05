@@ -57,3 +57,11 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 #selecting; 1792 is the smallest stack the panic handler accepts.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_STACK_SIZE=1792
+
+# Room for a browser and everything else at once.
+#
+# Chrome opens up to six connections to one host and keeps them alive. With
+# LWIP's default of ten sockets the HTTP server may use seven, so the browser
+# alone can sit one short of the limit -- and the next request then closes the
+# oldest connection, which lands on whichever answer took longest to produce.
+CONFIG_LWIP_MAX_SOCKETS=16
