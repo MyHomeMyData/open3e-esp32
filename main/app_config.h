@@ -71,6 +71,12 @@ typedef struct {
     /* Comma-separated, e.g. "0x451,0x441": the Vitocharge announces its
      * datapoints on one channel and its control mode on another. */
     char collect_canids[CFG_STR_MAX];
+    /* Comma-separated CAN-IDs whose raw bytes get relayed to MQTT
+     * (<base>/raw/<id>), independent of the decoded topics, HA discovery and
+     * points.json - see raw_relay.h. Empty by default (off); unrelated to
+     * collect_canids/em380_enabled above, which publish this firmware's own
+     * decoded view of the same kind of broadcast traffic. */
+    char raw_canids[CFG_STR_MAX];
     char tz[CFG_STR_MAX];   /* POSIX TZ, default "CET-1CEST,M3.5.0,M10.5.0/3" */
     /* What a bare "start charging" means: which storage unit, how much, and
      * for how long. Kept as settings rather than passed with every command so

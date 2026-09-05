@@ -34,6 +34,7 @@
 #include "o3e_json.h"
 #include "ota.h"
 #include "poller.h"
+#include "raw_relay.h"
 #include "sysinfo.h"
 
 static const char *TAG = "http";
@@ -1364,6 +1365,8 @@ static esp_err_t h_export(httpd_req_t *r)
     o3e_buf_adds(&b, sys.collect_enabled ? "true" : "false");
     o3e_buf_adds(&b, ", \"collectCanIds\": ");
     o3e_buf_add_json_str(&b, sys.collect_canids);
+    o3e_buf_adds(&b, ", \"rawCanIds\": ");
+    o3e_buf_add_json_str(&b, sys.raw_canids);
     o3e_buf_adds(&b, ", \"tz\": ");
     o3e_buf_add_json_str(&b, sys.tz);
     o3e_buf_adds(&b, "}, \"points\": ");
@@ -1585,6 +1588,8 @@ static esp_err_t h_settings_get(httpd_req_t *r)
     o3e_buf_adds(&b, sys.collect_enabled ? "true" : "false");
     o3e_buf_adds(&b, ", \"collectCanIds\": ");
     o3e_buf_add_json_str(&b, sys.collect_canids);
+    o3e_buf_adds(&b, ", \"rawCanIds\": ");
+    o3e_buf_add_json_str(&b, sys.raw_canids);
     o3e_buf_adds(&b, ", \"tz\": ");
     o3e_buf_add_json_str(&b, sys.tz);
     o3e_buf_adds(&b, ", \"hostname\": ");
@@ -1668,6 +1673,9 @@ static esp_err_t h_settings_put(httpd_req_t *r)
             sys.collect_enabled = cJSON_IsTrue(v);
         }
         copy_str(js, "collectCanIds", sys.collect_canids, sizeof(sys.collect_canids));
+        char raw_ids_was[CFG_STR_MAX];
+        snprintf(raw_ids_was, sizeof(raw_ids_was), "%s", sys.raw_canids);
+        copy_str(js, "rawCanIds", sys.raw_canids, sizeof(sys.raw_canids));
         copy_str(js, "tz", sys.tz, sizeof(sys.tz));
         sys_cfg_set(&sys);
         /* Takes effect immediately: enabling only installs a receive filter. */
@@ -1686,6 +1694,16 @@ static esp_err_t h_settings_put(httpd_req_t *r)
                 size_t n = collect_parse_ids(sys.collect_canids, ids, COLLECT_MAX_IDS);
                 if (n) {
                     collect_start(ids, n);
+                }
+            }
+        }
+        if (strcmp(raw_ids_was, sys.raw_canids) != 0) {
+            raw_relay_stop();
+            if (sys.raw_canids[0]) {
+                uint16_t ids[RAW_RELAY_MAX_IDS];
+                size_t n = collect_parse_ids(sys.raw_canids, ids, RAW_RELAY_MAX_IDS);
+                if (n) {
+                    raw_relay_start(ids, n);
                 }
             }
         }
