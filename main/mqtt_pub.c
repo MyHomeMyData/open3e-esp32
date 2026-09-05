@@ -10,6 +10,7 @@
 #include "mqtt_client.h"
 
 #include "app_config.h"
+#include "can_port.h"
 #include "ha_disco.h"
 #include "poller.h"
 #include "mqtt_cmnd.h"
@@ -165,6 +166,62 @@ bool mqtt_pub_value(const char *topic, const o3e_node_t *node,
 }
 
 /* ------------------------------------------------------------------ */
+/* Status push                                                          */
+
+/* Retained <base>/status, refreshed whenever CAN or MQTT health changes so a
+ * remote client (e.g. ioBroker.e3oncan's gateway transport) sees the current
+ * state on connect and on any real change afterwards, instead of having to
+ * poll /api/status. LWT already covers "the firmware is completely gone";
+ * this covers "the firmware is up but the bus or broker link is unwell". */
+static TaskHandle_t status_task_h;
+
+static void status_push_check(bool force)
+{
+    static char last_state[16] = "";
+    static bool last_mqtt;
+    static uint16_t last_tec, last_rec;
+    static bool have_last;
+
+    can_stats_t cs;
+    can_port_stats(&cs);
+    bool mqtt_ok = stats.connected;
+    const char *state = cs.state ? cs.state : "unknown";
+
+    if (!force && have_last && strcmp(last_state, state) == 0 &&
+        last_mqtt == mqtt_ok && last_tec == cs.tx_err_count &&
+        last_rec == cs.rx_err_count) {
+        return;
+    }
+
+    mqtt_cfg_t cfg;
+    mqtt_cfg_get(&cfg);
+    char topic[CFG_TOPIC_MAX + 8];
+    snprintf(topic, sizeof(topic), "%s/status", cfg.base_topic);
+
+    char json[96];
+    snprintf(json, sizeof(json),
+             "{\"can\": \"%s\", \"mqtt\": %s, \"tec\": %u, \"rec\": %u}",
+             state, mqtt_ok ? "true" : "false", cs.tx_err_count, cs.rx_err_count);
+
+    if (mqtt_pub_raw(topic, json, true)) {
+        snprintf(last_state, sizeof(last_state), "%s", state);
+        last_mqtt = mqtt_ok;
+        last_tec = cs.tx_err_count;
+        last_rec = cs.rx_err_count;
+        have_last = true;
+    }
+}
+
+static void status_push_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        status_push_check(false);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
+/* ------------------------------------------------------------------ */
 
 static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -275,6 +332,12 @@ static void mqtt_ctl_task(void *arg)
                 ESP_LOGD(TAG, "control task stack margin %u bytes", (unsigned)left);
             }
             poller_refresh();
+            /* Retained topics may need refreshing after a broker or client
+             * restart, same reasoning as the HA discovery publish above. */
+            status_push_check(true);
+            if (!status_task_h) {
+                xTaskCreate(status_push_task, "mqttstatus", 3072, NULL, 3, &status_task_h);
+            }
         }
         if (what & CTL_RESTART) {
             ESP_LOGI(TAG, "applying new settings");
