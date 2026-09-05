@@ -1809,7 +1809,11 @@ static const httpd_uri_t routes[] = {
     { "/api/names",       HTTP_GET,  h_names,        NULL },
     { "/api/candiag",     HTTP_POST, h_candiag,      NULL },
     { "/api/em380",       HTTP_GET,  h_em380,        NULL },
-    { "/api/collect",     HTTP_GET,  h_collect,      NULL },
+    /* Not "/api/collect": that path is what Google Analytics uses, so ad
+       blockers refuse it outright. The request never left the browser --
+       ERR_BLOCKED_BY_CLIENT -- while the same URL answered fine from curl,
+       which cost a long hunt through memory, sockets and crash dumps. */
+    { "/api/broadcast",   HTTP_GET,  h_collect,      NULL },
     { "/api/points",      HTTP_GET,  h_points_get,   NULL },
     { "/api/points",      HTTP_PUT,  h_points_put,   NULL },
     { "/api/read",        HTTP_GET,  h_read,         NULL },

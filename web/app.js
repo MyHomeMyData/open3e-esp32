@@ -988,7 +988,7 @@ async function traceLoad() {
 async function loadCollect() {
   let c;
   try {
-    c = await api("/api/collect");
+    c = await api("/api/broadcast");
   } catch (e) {
     /* Not swallowed: a dash with no reason reads the same as a quiet bus, and
        the two want completely different things done about them. */
