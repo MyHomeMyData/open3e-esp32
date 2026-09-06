@@ -1089,6 +1089,8 @@ async function loadSettings() {
   $("ha-on").checked = s.mqtt.haDiscovery;
   $("ha-prefix").value = s.mqtt.haPrefix;
   $("sys-write").checked = s.system.writeEnabled;
+  $("sys-rawwrite").checked = s.system.rawWriteEnabled;
+  $("sys-rawids").value = s.system.rawCanIds || "";
   $("sys-em380").checked = s.system.em380Enabled;
   $("co-on").checked = s.system.collectEnabled;
   $("co-id").value = s.system.collectCanIds || "0x451,0x441";
@@ -1101,9 +1103,11 @@ async function loadSettings() {
     $(`ct${i}-wire`).value = c.wire || "gnd";
     $(`ct${i}-rel`).value = c.releaseMs || 150;
   });
-  $("dbg-wstate").textContent = s.system.writeEnabled
-    ? "Schreiben ist freigegeben."
-    : "Schreiben ist gesperrt – in den Einstellungen freigeben.";
+  $("dbg-wstate").textContent =
+    (s.system.writeEnabled
+      ? "Schreiben ist freigegeben."
+      : "Schreiben ist gesperrt – in den Einstellungen freigeben.") +
+    (s.system.rawWriteEnabled ? " Rohes Schreiben ist ebenfalls freigegeben." : "");
 }
 
 async function saveSettings() {
@@ -1121,6 +1125,8 @@ async function saveSettings() {
     },
     system: {
       writeEnabled: $("sys-write").checked,
+      rawWriteEnabled: $("sys-rawwrite").checked,
+      rawCanIds: $("sys-rawids").value,
       em380Enabled: $("sys-em380").checked,
       tz: $("sys-tz").value,
       contacts: [0, 1].map((i) => ({

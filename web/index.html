@@ -501,6 +501,20 @@
       führt. Falsche Werte können die Heizung in einen unerwünschten Zustand bringen.
     </div>
     <label class="small"><input type="checkbox" id="sys-write"> Schreiben freigeben</label>
+    <div class="warnbox">
+      <b>Rohes Schreiben</b> geht zusätzlich an der Datenbank vorbei: keine
+      <span class="mono">rw</span>-Prüfung, keine Kodierung, auch auf Datenpunkte,
+      die diese Firmware gar nicht kennt. Nur einschalten, wenn eine externe
+      Integration (etwa ioBroker.e3oncan) über
+      <span class="mono">/api/rawwrite</span> schreiben soll.
+    </div>
+    <label class="small"><input type="checkbox" id="sys-rawwrite"> Rohes Schreiben freigeben (<span class="mono">/api/rawwrite</span>)</label>
+    <label><span>Rohe CAN-IDs an MQTT weiterreichen</span>
+      <input type="text" id="sys-rawids" placeholder="leer = aus, z. B. 0x451,0x250"></label>
+    <p class="small muted" style="margin:-4px 0 12px">Passiv. Jeder Frame dieser
+      IDs geht unverändert nach <span class="mono">&lt;Basis&gt;/raw/&lt;id&gt;</span>,
+      unabhängig von Datenpunkt-Auswahl und Auto-Discovery — für Software, die
+      selbst dekodiert. Höchstens 32 IDs.</p>
     <label class="small"><input type="checkbox" id="sys-em380"> E380-Energiezähler mitlesen (passiv)</label>
     <p class="small muted" style="margin:-4px 0 12px">Standardmäßig aus. Ohne
       angeschlossenen Zähler bringt es nichts und läuft nur im Empfangs-Interrupt mit.</p>
