@@ -27,6 +27,7 @@ Home-Assistant-Template läuft unverändert weiter.
 | CAN TX (TWAI) | 15 |
 | CAN RX (TWAI) | 16 |
 | RS485 TX / RX / DE | 17 / 18 / 21 (von dieser Firmware nicht genutzt) |
+| Kontakteingang 1 / 2 | 1 / 2 (SH1.0-Stecker, siehe unten) |
 
 Modul ESP32-S3-WROOM-1, 16 MB Flash, 8 MB PSRAM. Bus mit **250 kBit/s**.
 
@@ -493,6 +494,7 @@ make test
 | `test_isotp` | Segmentierung, Flow Control, SN-Wrap, Frame-Verlust | bis 4095 Byte |
 | `test_uds` | Antwort, Schweigen, negative Antwort, responsePending | 5 Szenarien |
 | `test_em380` | E380-Dekodierung == E3onCAN | 560 Vektoren über 14 CAN-IDs |
+| `test_contact` | Entprellung an Gleich- und Wechselspannung, Topic-Namen | 6 Signalformen |
 
 `make lint` prüft zusätzlich Includes und modulübergreifende Symbole der
 Firmware-Quellen, die sich ohne ESP-IDF nicht übersetzen lassen.
@@ -591,6 +593,84 @@ die betroffenen Nachrichten *lautlos* — kein Fehler, keine Zählung. Genau das
 prüft `test_collect` gegen die Rahmung eines echten Busses.
 
 ---
+
+## Kontakteingänge (Klingel, Türkontakt, Störmeldung)
+
+Der SH1.0-Stecker des Boards führt **GND, 3V3, GPIO1 und GPIO2** heraus. Beide
+Pins sind sonst unbenutzt: der CAN-Transceiver hängt an 15/16, der
+RS485-Treiber an 17/18/21, und Strapping-Pins sind auf dem ESP32-S3 nur 0, 3,
+45 und 46. Damit kann das Gerät, das ohnehin im Heizungsraum hängt, nebenbei
+zwei Schalter melden — eine Klingel, einen Türkontakt, einen
+Schwimmerschalter, einen Störmeldekontakt.
+
+Einschalten unter *Einstellungen → Kontakteingänge*. Jeder aktive Eingang
+
+- sendet retained nach `<Basis>/contact/<name>` den Wert `ON` oder `OFF`,
+- erscheint per Auto-Discovery als **binärer Sensor** in Home Assistant,
+- und zeigt seinen Zustand samt Auslösezähler direkt in der Weboberfläche.
+
+Der Name bestimmt das Topic: „Klingel Haustür" wird zu
+`open3e/contact/klingel_haustuer`. Umbenennen verschiebt also das Topic.
+
+### Verkabelung
+
+> **An den Pins dürfen höchstens 3,3 V anliegen.** Sie sind nicht geschützt.
+> 5 V zerstört sie, 12 V zerstört mehr als sie.
+
+**Potentialfreier Kontakt** — Taster, Reedkontakt, Relaiskontakt. Direkt
+anklemmen, ohne Bauteile:
+
+```
+GPIO1 ──┬── Kontakt ── GND
+        │
+     (interner Pull-up, in der Firmware gesetzt)
+```
+
+In den Einstellungen *Kontakt gegen GND (Pull-up)* wählen — die Voreinstellung.
+
+**Eine echte Klingel** ist kein potentialfreier Kontakt. Deutsche
+Klingelanlagen laufen mit **8–12 V Wechselspannung**; direkt angeklemmt ist
+der ESP32 hinüber. Dazwischen gehört ein Optokoppler:
+
+```
+Klingel-Trafo ── Taster ──┬── Klingelspule ──┐
+                          │                  │
+                          └─ 2,2 kΩ / 1 W ── LED des PC814 ──┘
+
+PC814, Transistorseite:   Kollektor ── GPIO1
+                          Emitter   ── GND
+```
+
+Der PC814 hat zwei antiparallele LEDs und verträgt Wechselspannung direkt;
+mit einem PC817 braucht es zusätzlich einen Brückengleichrichter oder eine
+antiparallele Diode. Der Vorwiderstand ist für 12 V~ gerechnet (≈ 7 mA
+Effektivstrom); bei 8 V~ tut es auch 1,5 kΩ. Genauso gut: ein
+Klingeltrafo-Relais mit potentialfreiem Kontakt — dann gilt wieder der obere
+Fall.
+
+Ist am Klingeltrafo nichts zu ändern, gibt es den Abgriff auch fertig als
+„Klingel-WLAN-Modul" mit Relaisausgang.
+
+### Warum es eine Abfallzeit gibt
+
+Ein Optokoppler an Wechselspannung liefert **kein Level, sondern ein
+Rechteck**: eine Halbwelle leitet, die nächste nicht, 50 Hz lang, solange
+jemand auf den Knopf drückt. Eine normale Entprellung — „N gleiche Abtastungen
+hintereinander" — kommt darauf nie zur Ruhe und meldet aus einem Klingeln
+hundert.
+
+Deshalb ist die Entprellung unsymmetrisch: **zwei** aufeinanderfolgende
+aktive Abtastungen (10 ms) machen den Eingang aktiv, und erst eine
+ununterbrochene Ruhe von **Abfallzeit** Millisekunden macht ihn wieder
+inaktiv. 150 ms überbrücken die 10-ms-Lücken eines zerhackten Signals
+bequem und entprellen zugleich jeden Taster. Wird ein Klingeln trotzdem als
+mehrere gezählt, höher stellen.
+
+Getestet wird das nicht an der Haustür, sondern in `test_contact` gegen ein
+synthetisiertes Signal — sauberer Druck, prellender Druck, zerhackte
+Wechselspannung, einzelne eingestreute Spitze, Netzaussetzer mitten im
+Klingeln. Ohne die unsymmetrische Regel meldet der Test 100 Klingelzeichen in
+zwei Sekunden statt einem.
 
 ## Sichern und wiederherstellen
 

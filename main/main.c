@@ -20,6 +20,7 @@
 #include "can_port.h"
 #include "collect.h"
 #include "cantrace.h"
+#include "contact.h"
 #include "em380.h"
 #include "httpd_api.h"
 #include "mqtt_pub.h"
@@ -117,6 +118,9 @@ void app_main(void)
         if (sys.em380_enabled) {
             em380_start();
         }
+        /* The contact inputs are local: they need no bus and no broker, so
+         * they run whenever the device is past setup. */
+        contact_start();
         if (sys.collect_enabled) {
             uint16_t ids[COLLECT_MAX_IDS];
             size_t n = collect_parse_ids(sys.collect_canids, ids, COLLECT_MAX_IDS);

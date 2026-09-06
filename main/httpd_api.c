@@ -20,6 +20,7 @@
 #include "can_port.h"
 #include "cantrace.h"
 #include "collect.h"
+#include "contact.h"
 #include "crashlog.h"
 #include "e3_scan.h"
 #include "em380.h"
@@ -318,6 +319,22 @@ static esp_err_t h_status(httpd_req_t *r)
              poll.active_points, (unsigned)poll.polls, (unsigned)poll.failures,
              (unsigned)poll.published);
     o3e_buf_adds(&b, t);
+
+    o3e_buf_adds(&b, "\"contacts\": [");
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        contact_status_t cs;
+        contact_status(i, &cs);
+        snprintf(t, sizeof(t),
+                 "%s{\"pin\": %d, \"enabled\": %s, \"active\": %s, "
+                 "\"edges\": %u, \"sinceS\": %u, \"name\": ",
+                 i ? ", " : "", CONTACT_PINS[i],
+                 cs.enabled ? "true" : "false", cs.active ? "true" : "false",
+                 (unsigned)cs.edges, (unsigned)cs.since_s);
+        o3e_buf_adds(&b, t);
+        o3e_buf_add_json_str(&b, sys.contact[i].name);
+        o3e_buf_adds(&b, "}");
+    }
+    o3e_buf_adds(&b, "], ");
 
     snprintf(t, sizeof(t),
              "\"scan\": {\"phase\": \"%s\", \"probed\": %u, \"total\": %u, "
@@ -1139,6 +1156,10 @@ static bool stream_file_inline(httpd_req_t *r, const char *path, const char *dfl
  * The scan result is optional because it is the bulky part -- hundreds of
  * kilobytes -- but also the expensive one to recreate, so it defaults to
  * included. Both files are streamed rather than assembled in memory. */
+static void copy_str(const cJSON *o, const char *key, char *dst, size_t dst_sz);
+static void contacts_to_json(o3e_buf_t *b, const sys_cfg_t *sys);
+static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys);
+
 static esp_err_t h_export(httpd_req_t *r)
 {
     uint16_t with_scan = 1;
@@ -1205,6 +1226,8 @@ static esp_err_t h_export(httpd_req_t *r)
     o3e_buf_add_json_str(&b, sys.collect_canids);
     o3e_buf_adds(&b, ", \"tz\": ");
     o3e_buf_add_json_str(&b, sys.tz);
+    o3e_buf_adds(&b, ", \"contacts\": ");
+    contacts_to_json(&b, &sys);
     o3e_buf_adds(&b, "}, \"points\": ");
 
     if (b.oom || !b.buf ||
@@ -1354,7 +1377,9 @@ static bool import_apply(const cJSON *root, char *err, size_t err_sz)
             sc.em380_enabled = cJSON_IsTrue(v);
         }
         copy_str(js, "tz", sc.tz, sizeof(sc.tz));
+        contacts_from_json(cJSON_GetObjectItem(js, "contacts"), &sc);
         sys_cfg_set(&sc);
+        contact_start();
     }
 
     const cJSON *jp = cJSON_GetObjectItem(root, "points");
@@ -1421,6 +1446,8 @@ static esp_err_t h_settings_get(httpd_req_t *r)
     o3e_buf_add_json_str(&b, sys.collect_canids);
     o3e_buf_adds(&b, ", \"tz\": ");
     o3e_buf_add_json_str(&b, sys.tz);
+    o3e_buf_adds(&b, ", \"contacts\": ");
+    contacts_to_json(&b, &sys);
     o3e_buf_adds(&b, ", \"hostname\": ");
     o3e_buf_add_json_str(&b, wifi.hostname);
     o3e_buf_adds(&b, "}}");
@@ -1437,6 +1464,63 @@ static void copy_str(const cJSON *o, const char *key, char *dst, size_t dst_sz)
         snprintf(dst, dst_sz, "%s", v->valuestring);
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Contact inputs                                                       */
+/*
+ * The same two shapes in three places -- the settings page, the backup, and
+ * the restore -- so they are written once here.
+ */
+static void contacts_to_json(o3e_buf_t *b, const sys_cfg_t *sys)
+{
+    o3e_buf_adds(b, "[");
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        char t[96];
+        snprintf(t, sizeof(t), "%s{\"pin\": %d, \"enabled\": %s, \"name\": ",
+                 i ? ", " : "", CONTACT_PINS[i],
+                 sys->contact[i].enabled ? "true" : "false");
+        o3e_buf_adds(b, t);
+        o3e_buf_add_json_str(b, sys->contact[i].name);
+        o3e_buf_adds(b, ", \"deviceClass\": ");
+        o3e_buf_add_json_str(b, sys->contact[i].device_class);
+        snprintf(t, sizeof(t), ", \"wire\": \"%s\", \"releaseMs\": %u}",
+                 sys->contact[i].wire == CONTACT_TO_3V3 ? "3v3" : "gnd",
+                 (unsigned)sys->contact[i].release_ms);
+        o3e_buf_adds(b, t);
+    }
+    o3e_buf_adds(b, "]");
+}
+
+static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys)
+{
+    if (!cJSON_IsArray(arr)) {
+        return;
+    }
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        const cJSON *o = cJSON_GetArrayItem((cJSON *)arr, i);
+        if (!cJSON_IsObject(o)) {
+            continue;
+        }
+        const cJSON *v;
+        if (cJSON_IsBool(v = cJSON_GetObjectItem(o, "enabled"))) {
+            sys->contact[i].enabled = cJSON_IsTrue(v);
+        }
+        copy_str(o, "name", sys->contact[i].name, sizeof(sys->contact[i].name));
+        copy_str(o, "deviceClass", sys->contact[i].device_class,
+                 sizeof(sys->contact[i].device_class));
+        if (cJSON_IsString(v = cJSON_GetObjectItem(o, "wire"))) {
+            sys->contact[i].wire = strcmp(v->valuestring, "3v3") == 0
+                                       ? CONTACT_TO_3V3 : CONTACT_TO_GND;
+        }
+        if (cJSON_IsNumber(v = cJSON_GetObjectItem(o, "releaseMs"))) {
+            uint32_t ms = (uint32_t)v->valuedouble;
+            if (ms < CONTACT_RELEASE_MIN) ms = CONTACT_RELEASE_MIN;
+            if (ms > CONTACT_RELEASE_MAX) ms = CONTACT_RELEASE_MAX;
+            sys->contact[i].release_ms = (uint16_t)ms;
+        }
+    }
+}
+
 
 static esp_err_t h_settings_put(httpd_req_t *r)
 {
@@ -1500,7 +1584,19 @@ static esp_err_t h_settings_put(httpd_req_t *r)
         }
         copy_str(js, "collectCanIds", sys.collect_canids, sizeof(sys.collect_canids));
         copy_str(js, "tz", sys.tz, sizeof(sys.tz));
+        contact_cfg_t contacts_was[CONTACT_COUNT];
+        memcpy(contacts_was, sys.contact, sizeof(contacts_was));
+        contacts_from_json(cJSON_GetObjectItem(js, "contacts"), &sys);
         sys_cfg_set(&sys);
+        /* Reconfigures the pins in place; enabling an input takes effect
+         * without a restart, like every other setting on this page. */
+        contact_start();
+        /* A renamed input moves its topic and a disabled one has to lose its
+         * entity, so the announcement has to follow the change rather than
+         * wait for the next broker reconnect. */
+        if (memcmp(contacts_was, sys.contact, sizeof(contacts_was)) != 0) {
+            ha_disco_publish_all();
+        }
         /* Takes effect immediately: enabling only installs a receive filter. */
         if (em_was != sys.em380_enabled) {
             if (sys.em380_enabled) {

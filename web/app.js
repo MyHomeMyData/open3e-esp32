@@ -133,6 +133,18 @@ function renderStatus(s) {
   $("s-clock").textContent = s.clockValid ? s.clock : "nicht gesetzt";
   $("s-clock").className = s.clockValid ? "v" : "v muted";
 
+  /* The poll runs every five seconds and a doorbell press lasts one, so the
+     state alone would rarely catch anything. The count is what actually
+     confirms the wiring: press once, see it climb by one. */
+  (s.contacts || []).forEach((c, i) => {
+    const el = $(`ct${i}-state`);
+    if (!el) return;
+    el.textContent = !c.enabled
+      ? "aus"
+      : `${c.active ? "geschlossen" : "offen"} seit ${fmtDuration(c.sinceS)}` +
+        ` · ${c.edges} Auslösung${c.edges === 1 ? "" : "en"}`;
+  });
+
   $("s-canstate").textContent = s.can.state;
   $("s-buserr").textContent = s.can.busErrors;
   /* TEC/REC climb long before the controller actually goes bus-off, so they
@@ -1081,6 +1093,14 @@ async function loadSettings() {
   $("co-on").checked = s.system.collectEnabled;
   $("co-id").value = s.system.collectCanIds || "0x451,0x441";
   $("sys-tz").value = s.system.tz;
+  (s.system.contacts || []).forEach((c, i) => {
+    if (!$(`ct${i}-on`)) return;
+    $(`ct${i}-on`).checked = c.enabled;
+    $(`ct${i}-name`).value = c.name || "";
+    $(`ct${i}-class`).value = c.deviceClass || "";
+    $(`ct${i}-wire`).value = c.wire || "gnd";
+    $(`ct${i}-rel`).value = c.releaseMs || 150;
+  });
   $("dbg-wstate").textContent = s.system.writeEnabled
     ? "Schreiben ist freigegeben."
     : "Schreiben ist gesperrt – in den Einstellungen freigeben.";
@@ -1103,6 +1123,13 @@ async function saveSettings() {
       writeEnabled: $("sys-write").checked,
       em380Enabled: $("sys-em380").checked,
       tz: $("sys-tz").value,
+      contacts: [0, 1].map((i) => ({
+        enabled: $(`ct${i}-on`).checked,
+        name: $(`ct${i}-name`).value,
+        deviceClass: $(`ct${i}-class`).value,
+        wire: $(`ct${i}-wire`).value,
+        releaseMs: Number($(`ct${i}-rel`).value) || 150,
+      })),
     },
   };
   /* Only send the password when one was actually typed, so the stored value
@@ -1244,6 +1271,7 @@ function initApp() {
   $("em-only-seen").onchange = () => loadMeter().catch(() => {});
 
   $("set-save").onclick = saveSettings;
+  $("ct-save").onclick = saveSettings;
   $("crash-clear").onclick = async () => {
     try {
       await api("/api/crash", { method: "DELETE" });

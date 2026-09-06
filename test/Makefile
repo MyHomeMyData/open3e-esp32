@@ -6,8 +6,8 @@ LDLIBS  := -lcjson -lm
 SRC     := ../main/o3e_json.c ../main/o3e_db.c ../main/o3e_codec.c
 FLAT    := ../main/o3e_flatten.c
 
-.PHONY: all clean codec encode flatten isotp uds em380 collect hadisco sanitize
-all: codec encode flatten em380 isotp uds collect hadisco
+.PHONY: all clean codec encode flatten isotp uds em380 collect hadisco contact sanitize
+all: codec encode flatten em380 isotp uds collect hadisco contact
 
 build:
 	@mkdir -p build
@@ -15,8 +15,8 @@ build:
 build/test_codec: build test_codec.c $(SRC)
 	$(CC) $(CFLAGS) -o $@ test_codec.c $(SRC) $(LDLIBS)
 
-build/test_hadisco: build test_hadisco.c ../main/ha_disco.c $(SRC)
-	$(CC) $(CFLAGS) -I stubs -I ../main -o $@ test_hadisco.c ../main/ha_disco.c $(SRC) $(LDLIBS)
+build/test_hadisco: build test_hadisco.c ../main/ha_disco.c ../main/contact.c $(SRC)
+	$(CC) $(CFLAGS) -I stubs -I ../main -o $@ test_hadisco.c ../main/ha_disco.c ../main/contact.c $(SRC) $(LDLIBS)
 
 hadisco: build/test_hadisco
 	cd .. && test/build/test_hadisco data/o3edb.bin
@@ -26,6 +26,12 @@ build/test_collect: build test_collect.c ../main/collect_parse.c
 
 collect: build/test_collect
 	cd .. && test/build/test_collect test/collect_frames.txt
+
+build/test_contact: build test_contact.c ../main/contact.c
+	$(CC) $(CFLAGS) -o $@ test_contact.c ../main/contact.c
+
+contact: build/test_contact
+	./build/test_contact
 
 build/test_isotp: build test_isotp.c ../main/isotp.c
 	$(CC) $(CFLAGS) -o $@ test_isotp.c ../main/isotp.c -lpthread

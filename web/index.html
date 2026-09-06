@@ -514,6 +514,91 @@
   </div>
 
   <div class="card">
+    <h2>Kontakteingänge</h2>
+    <p class="hint">Der SH1.0-Stecker führt GND, 3V3, GPIO1 und GPIO2 heraus. Beide
+      Pins sind sonst unbenutzt und können einen Schalter lesen — Klingel,
+      Türkontakt, Schwimmerschalter, Störmeldekontakt. Jeder aktive Eingang wird
+      als <span class="mono">&lt;Basis&gt;/contact/&lt;name&gt;</span> gesendet und
+      erscheint in Home Assistant als binärer Sensor.</p>
+    <div class="warnbox">
+      <b>Nur potentialfreie Kontakte.</b> An den Pins dürfen höchstens 3,3&nbsp;V
+      anliegen. Eine Klingel läuft mit 8–12&nbsp;V Wechselspannung und zerstört
+      den ESP32, wenn sie direkt angeklemmt wird — dazwischen gehört ein
+      Optokoppler oder ein Relais.
+    </div>
+  <div class="row" style="align-items:flex-end">
+      <label style="flex:0 0 auto"><span>GPIO1</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="ct0-on"> aktiv</label>
+      </label>
+      <label><span>Name</span><input type="text" id="ct0-name" placeholder="z. B. Klingel" maxlength="31"></label>
+      <label style="flex:0 0 170px"><span>Art</span>
+        <select id="ct0-class">
+          <option value="">– keine –</option>
+          <option value="sound">Klingel</option>
+          <option value="door">Tür</option>
+          <option value="garage_door">Garagentor</option>
+          <option value="window">Fenster</option>
+          <option value="motion">Bewegung</option>
+          <option value="occupancy">Anwesenheit</option>
+          <option value="moisture">Wasser</option>
+          <option value="smoke">Rauch</option>
+          <option value="problem">Störung</option>
+          <option value="running">Läuft</option>
+        </select>
+      </label>
+      <label style="flex:0 0 190px"><span>Kontakt gegen</span>
+        <select id="ct0-wire">
+          <option value="gnd">GND (Pull-up)</option>
+          <option value="3v3">3V3 (Pull-down)</option>
+        </select>
+      </label>
+      <label style="flex:0 0 130px"><span>Abfallzeit (ms)</span>
+        <input type="number" id="ct0-rel" min="20" max="5000" step="10" value="150"></label>
+    </div>
+    <p class="small muted" style="margin:-2px 0 14px">Zustand:
+      <span class="mono" id="ct0-state">–</span></p>
+  <div class="row" style="align-items:flex-end">
+      <label style="flex:0 0 auto"><span>GPIO2</span>
+        <label class="small" style="margin:0"><input type="checkbox" id="ct1-on"> aktiv</label>
+      </label>
+      <label><span>Name</span><input type="text" id="ct1-name" placeholder="z. B. Klingel" maxlength="31"></label>
+      <label style="flex:0 0 170px"><span>Art</span>
+        <select id="ct1-class">
+          <option value="">– keine –</option>
+          <option value="sound">Klingel</option>
+          <option value="door">Tür</option>
+          <option value="garage_door">Garagentor</option>
+          <option value="window">Fenster</option>
+          <option value="motion">Bewegung</option>
+          <option value="occupancy">Anwesenheit</option>
+          <option value="moisture">Wasser</option>
+          <option value="smoke">Rauch</option>
+          <option value="problem">Störung</option>
+          <option value="running">Läuft</option>
+        </select>
+      </label>
+      <label style="flex:0 0 190px"><span>Kontakt gegen</span>
+        <select id="ct1-wire">
+          <option value="gnd">GND (Pull-up)</option>
+          <option value="3v3">3V3 (Pull-down)</option>
+        </select>
+      </label>
+      <label style="flex:0 0 130px"><span>Abfallzeit (ms)</span>
+        <input type="number" id="ct1-rel" min="20" max="5000" step="10" value="150"></label>
+    </div>
+    <p class="small muted" style="margin:-2px 0 14px">Zustand:
+      <span class="mono" id="ct1-state">–</span></p>
+    <p class="small muted" style="margin:0 0 12px">Die <b>Abfallzeit</b> ist die
+      Ruhe, nach der ein Kontakt wieder als offen gilt. 150&nbsp;ms genügen für
+      einen Taster und überbrücken zugleich die Lücken eines über einen
+      Optokoppler abgegriffenen Wechselspannungssignals. Höher stellen, wenn ein
+      Klingeln als mehrere gezählt wird.</p>
+    <div class="row">
+      <button class="btn" id="ct-save" style="flex:0 0 auto">Eingänge speichern</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Sichern und wiederherstellen</h2>
     <p class="hint">Die Sicherung enthält WLAN, MQTT, Systemeinstellungen, die
       Datenpunkt-Auswahl und wahlweise das Scan-Ergebnis — alles, um ein Gerät

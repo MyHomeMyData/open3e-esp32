@@ -7,6 +7,8 @@ idf_component_register(
         "crashlog.c"
         "hold.c"
         "collect_parse.c"
+        "contact.c"
+        "contact_io.c"
         "cantrace.c"
         "e3_scan.c"
         "em380.c"
@@ -26,6 +28,7 @@ idf_component_register(
         "uds.c"
     INCLUDE_DIRS "."
     REQUIRES
+        esp_driver_gpio
         esp_driver_twai
         esp_event
         esp_http_server

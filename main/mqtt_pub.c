@@ -10,6 +10,7 @@
 #include "mqtt_client.h"
 
 #include "app_config.h"
+#include "contact.h"
 #include "ha_disco.h"
 #include "poller.h"
 #include "mqtt_cmnd.h"
@@ -264,6 +265,10 @@ static void mqtt_ctl_task(void *arg)
              * readings were dropped while disconnected should not wait out a
              * whole interval. */
             ha_disco_publish_all();
+            /* Retained, so this only matters for a broker that has lost its
+             * retained set -- but that is exactly the case where a doorbell
+             * would otherwise read "unknown" until the next visitor. */
+            contact_publish();
             /* This walk is the deepest thing this task does, and it grew a
              * control entity per writable leaf. It overflowed a 4 KiB stack
              * once, and the only symptom was that everything after it went

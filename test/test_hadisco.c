@@ -14,6 +14,7 @@
 
 #include "cJSON.h"
 #include "../main/app_config.h"
+#include "../main/contact.h"
 #include "../main/ha_disco.h"
 #include "../main/mqtt_pub.h"
 #include "../main/o3e_db.h"
@@ -21,6 +22,7 @@
 /* ---- the world the discovery code talks to ---- */
 
 static mqtt_cfg_t g_cfg;
+static sys_cfg_t  g_sys;
 static char      *g_points;
 
 typedef struct { char *topic; char *payload; } msg_t;
@@ -40,6 +42,7 @@ int esp_read_mac(uint8_t *out, int t)
 }
 
 void mqtt_cfg_get(mqtt_cfg_t *out) { *out = g_cfg; }
+void sys_cfg_get(sys_cfg_t *out) { *out = g_sys; }
 bool mqtt_pub_connected(void) { return true; }
 
 bool mqtt_pub_raw(const char *topic, const char *payload, bool retain)
@@ -126,6 +129,7 @@ static void reset(const char *points, const char *cmnd, const char *mode)
     free(g_points);
     g_points = strdup(points);
     memset(&g_cfg, 0, sizeof(g_cfg));
+    memset(&g_sys, 0, sizeof(g_sys));
     g_cfg.enabled = true;
     g_cfg.ha_discovery = true;
     snprintf(g_cfg.base_topic, sizeof(g_cfg.base_topic), "open3e-vent");
@@ -375,6 +379,46 @@ int main(int argc, char **argv)
            m->payload);
         cJSON_Delete(j);
     }
+
+    /* --- the contact inputs --- */
+    snprintf(points, sizeof(points), POINTS_533, "flat");
+    reset(points, "open3e-vent/cmnd", "flat");
+    g_sys.contact[0].enabled = true;
+    snprintf(g_sys.contact[0].name, sizeof(g_sys.contact[0].name), "Klingel Haustür");
+    snprintf(g_sys.contact[0].device_class,
+             sizeof(g_sys.contact[0].device_class), "sound");
+    ha_disco_publish_all();
+
+    m = find("homeassistant/binary_sensor/open3e_112233/contact1/config");
+    ok("contact input is announced", m != NULL && m->payload[0], NULL);
+    if (m && m->payload[0]) {
+        cJSON *j = cJSON_Parse(m->payload);
+        ok("contact payload is valid JSON", j != NULL, m->payload);
+        if (j) {
+            const cJSON *st = cJSON_GetObjectItem(j, "state_topic");
+            ok("contact reads the topic its own name produces",
+               cJSON_IsString(st)
+                 && strcmp(st->valuestring, "open3e-vent/contact/klingel_haustuer") == 0,
+               cJSON_IsString(st) ? st->valuestring : "(none)");
+            const cJSON *dc = cJSON_GetObjectItem(j, "device_class");
+            ok("contact carries the chosen device class",
+               cJSON_IsString(dc) && strcmp(dc->valuestring, "sound") == 0,
+               m->payload);
+            /* A binary sensor with a command topic is an entity Home Assistant
+               will happily let somebody press, which would send an empty
+               command to the bus. */
+            ok("a contact is read-only",
+               cJSON_GetObjectItem(j, "command_topic") == NULL, m->payload);
+            cJSON_Delete(j);
+        }
+    }
+    /* The second input is off, so its config has to be retracted rather than
+       left alone -- otherwise a contact that is switched off keeps a
+       permanently unavailable entity in Home Assistant. */
+    m = find("homeassistant/binary_sensor/open3e_112233/contact2/config");
+    ok("a disabled contact is retracted",
+       m != NULL && m->payload[0] == '\0',
+       m ? (m->payload[0] ? m->payload : "(empty)") : "(never published)");
 
     printf("%s: %zu discovery messages inspected\n", fail ? "FAILED" : "ha_disco", g_n);
     return fail ? 1 : 0;

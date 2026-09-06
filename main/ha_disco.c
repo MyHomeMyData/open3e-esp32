@@ -9,6 +9,7 @@
 #include "esp_mac.h"
 
 #include "app_config.h"
+#include "contact.h"
 #include "hold.h"
 #include "mqtt_pub.h"
 #include "o3e_codec.h"
@@ -18,6 +19,7 @@
 static const char *TAG = "ha";
 
 static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear);
+static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool clear);
 
 /* Map the open3e unit string onto a Home Assistant device class. Only units
  * that actually occur in the database are listed; anything else is published
@@ -639,8 +641,9 @@ static void ha_disco_walk_selection(bool clear)
     }
     cJSON_Delete(root);
 
-    /* Not a datapoint, so the walk never reaches it -- announced separately. */
+    /* Not datapoints, so the walk never reaches them -- announced separately. */
     ha_disco_grid(&cfg, dev_id, clear);
+    ha_disco_contacts(&cfg, dev_id, clear);
 
     /* Counted separately: "published for 19 datapoints" says nothing about
      * whether any of them became operable, and a control that never appears
@@ -659,11 +662,15 @@ static void ha_disco_walk_selection(bool clear)
  * own regulation should be visible and stoppable from wherever the operator
  * happens to be looking, not only on this device's own page.
  */
-static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
-                                const char *component, const char *object,
-                                const char *name, const char *extra, bool clear)
+static void publish_extra_entity(const mqtt_cfg_t *cfg, const char *dev_id,
+                                 const char *component, const char *object,
+                                 const char *name, const char *state,
+                                 const char *extra, bool clear)
 {
-    bool is_sensor = strcmp(component, "sensor") == 0;
+    /* Anything that only reads needs no command topic and counts as a sensor;
+     * everything else is an operable control. */
+    bool is_sensor = strcmp(component, "sensor") == 0 ||
+                     strcmp(component, "binary_sensor") == 0;
 
     char topic[352];
     snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
@@ -680,8 +687,7 @@ static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
         return;
     }
 
-    char state[CFG_TOPIC_MAX + 8], lwt[CFG_TOPIC_MAX + 8];
-    snprintf(state, sizeof(state), "%s/hold", cfg->base_topic);
+    char lwt[CFG_TOPIC_MAX + 8];
     snprintf(lwt, sizeof(lwt), "%s/LWT", cfg->base_topic);
 
     o3e_buf_t b;
@@ -694,7 +700,7 @@ static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     char uid[160];
     snprintf(uid, sizeof(uid), "%s_%s", dev_id, object);
     o3e_buf_add_json_str(&b, uid);
-    if (cfg->cmnd_topic[0]) {
+    if (!is_sensor && cfg->cmnd_topic[0]) {
         o3e_buf_adds(&b, ", \"command_topic\": ");
         o3e_buf_add_json_str(&b, cfg->cmnd_topic);
     }
@@ -714,9 +720,20 @@ static void publish_grid_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     o3e_buf_free(&b);
 }
 
+/* Everything the hold publishes lives in one JSON message on <base>/hold, so
+ * its entities differ only in which field they pick out of it. */
+static void publish_hold_entity(const mqtt_cfg_t *cfg, const char *dev_id,
+                                const char *component, const char *object,
+                                const char *name, const char *extra, bool clear)
+{
+    char state[CFG_TOPIC_MAX + 8];
+    snprintf(state, sizeof(state), "%s/hold", cfg->base_topic);
+    publish_extra_entity(cfg, dev_id, component, object, name, state, extra, clear);
+}
+
 static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
 {
-    publish_grid_entity(cfg, dev_id, "switch", "grid_hold",
+    publish_hold_entity(cfg, dev_id, "switch", "grid_hold",
         "Aus dem Netz laden",
         "\"value_template\": \"{{ 'ON' if value_json.active else 'OFF' }}\", "
         "\"payload_on\": \"{\\\"mode\\\": \\\"grid\\\", \\\"on\\\": true}\", "
@@ -731,7 +748,7 @@ static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
         "\"min\": 100, \"max\": %d, \"step\": 100, \"mode\": \"box\", "
         "\"unit_of_measurement\": \"W\", \"icon\": \"mdi:flash\"",
         GRID_HOLD_MAX_W);
-    publish_grid_entity(cfg, dev_id, "number", "grid_power",
+    publish_hold_entity(cfg, dev_id, "number", "grid_power",
                         "Netzladeleistung", num, clear);
 
     snprintf(num, sizeof(num),
@@ -741,10 +758,10 @@ static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
         "\"min\": 1, \"max\": %d, \"step\": 1, \"mode\": \"box\", "
         "\"unit_of_measurement\": \"min\", \"icon\": \"mdi:timer-outline\"",
         GRID_HOLD_MAX_S / 60);
-    publish_grid_entity(cfg, dev_id, "number", "grid_minutes",
+    publish_hold_entity(cfg, dev_id, "number", "grid_minutes",
                         "Netzladedauer", num, clear);
 
-    publish_grid_entity(cfg, dev_id, "sensor", "grid_remaining",
+    publish_hold_entity(cfg, dev_id, "sensor", "grid_remaining",
         "Netzladen Restzeit",
         "\"value_template\": \"{{ value_json.remainingS }}\", "
         "\"unit_of_measurement\": \"s\", \"device_class\": \"duration\", "
@@ -752,7 +769,7 @@ static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
 
     /* The storage's own limits, as a mode rather than two numbers: only the
      * extremes are written, so there is nothing to dial. */
-    publish_grid_entity(cfg, dev_id, "select", "storage_mode",
+    publish_hold_entity(cfg, dev_id, "select", "storage_mode",
         "Speicher-Betriebsart",
         "\"value_template\": \"{{ value_json.storage }}\", "
         "\"command_template\": \"{\\\"mode\\\": \\\"storage\\\", "
@@ -760,7 +777,7 @@ static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
         "\"options\": [\"normal\", \"steht still\", \"nur laden\", "
         "\"nur entladen\"], \"icon\": \"mdi:battery-lock\"", clear);
 
-    publish_grid_entity(cfg, dev_id, "sensor", "storage_remaining",
+    publish_hold_entity(cfg, dev_id, "sensor", "storage_remaining",
         "Speicher-Betriebsart Restzeit",
         "\"value_template\": \"{{ value_json.storageRemainingS }}\", "
         "\"unit_of_measurement\": \"s\", \"device_class\": \"duration\", "
@@ -779,3 +796,53 @@ void ha_disco_counts(int *sensors, int *controls)
 
 void ha_disco_publish_all(void) { ha_disco_walk_selection(false); }
 void ha_disco_clear_all(void)   { ha_disco_walk_selection(true); }
+
+/* The two contact inputs, one binary sensor each.
+ *
+ * A doorbell is the reason these exist, and a doorbell is worth exactly one
+ * entity: it is on while somebody is pressing and off otherwise. The device
+ * class is the user's, because only they know whether the thing on the wire
+ * is a bell, a door, a float switch or a fault relay -- and the class is what
+ * decides the icon and the wording Home Assistant uses for both states.
+ */
+static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
+{
+    sys_cfg_t sys;
+    sys_cfg_get(&sys);
+
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        char object[32];
+        snprintf(object, sizeof(object), "contact%d", i + 1);
+
+        /* A disabled input is retracted rather than skipped: switching one off
+         * has to remove its entity, or Home Assistant keeps an entity that is
+         * permanently unavailable and nothing says why. */
+        if (clear || !sys.contact[i].enabled) {
+            char topic[352];
+            snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/%s/config",
+                     cfg->ha_prefix, dev_id, object);
+            mqtt_pub_raw(topic, "", true);
+            if (clear) {
+                n_sensors++;
+            }
+            continue;
+        }
+
+        char slug[CONTACT_NAME_MAX * 2];
+        contact_slug(&sys.contact[i], i, slug, sizeof(slug));
+        char state[CFG_TOPIC_MAX + sizeof(slug) + 16];
+        snprintf(state, sizeof(state), "%s/contact/%s", cfg->base_topic, slug);
+
+        char extra[192];
+        int o = snprintf(extra, sizeof(extra),
+                         "\"payload_on\": \"ON\", \"payload_off\": \"OFF\"");
+        if (sys.contact[i].device_class[0]) {
+            snprintf(extra + o, sizeof(extra) - o, ", \"device_class\": \"%s\"",
+                     sys.contact[i].device_class);
+        }
+
+        const char *name = sys.contact[i].name[0] ? sys.contact[i].name : object;
+        publish_extra_entity(cfg, dev_id, "binary_sensor", object, name, state,
+                             extra, false);
+    }
+}

@@ -13,6 +13,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "contact.h"
+
 #define CFG_STR_MAX      64
 /* The 802.11 limits, so these buffers match the fields in wifi_config_t
  * exactly: an SSID is at most 32 octets, a WPA2 passphrase 63 characters.
@@ -73,6 +75,10 @@ typedef struct {
     uint16_t grid_ecu;
     uint16_t grid_watts;
     uint16_t grid_minutes;
+    /* The two contact inputs on the SH1.0 connector. Both off by default:
+     * an unconfigured pin has nothing attached, and a pull-up on a bare pin
+     * would report a permanently open contact. */
+    contact_cfg_t contact[CONTACT_COUNT];
 } sys_cfg_t;
 
 bool app_config_init(void);          /* opens NVS and mounts LittleFS */

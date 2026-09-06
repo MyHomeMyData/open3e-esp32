@@ -245,6 +245,9 @@ void sys_cfg_get(sys_cfg_t *out)
     if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
         snprintf(out->tz, sizeof(out->tz), "%s", tz_default);
         snprintf(out->collect_canids, sizeof(out->collect_canids), "0x451,0x441");
+        for (int i = 0; i < CONTACT_COUNT; i++) {
+            out->contact[i].release_ms = CONTACT_RELEASE_MS;
+        }
         return;
     }
     out->write_enabled = nvs_get_u8_or(h, "wr_on", 0) != 0;
@@ -256,6 +259,22 @@ void sys_cfg_get(sys_cfg_t *out)
     out->grid_ecu = (uint16_t)nvs_get_u16_or(h, "grid_ecu", 0);
     out->grid_watts = (uint16_t)nvs_get_u16_or(h, "grid_w", 2000);
     out->grid_minutes = (uint16_t)nvs_get_u16_or(h, "grid_min", 15);
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        char k[16];
+        snprintf(k, sizeof(k), "c%d_on", i);
+        out->contact[i].enabled = nvs_get_u8_or(h, k, 0) != 0;
+        snprintf(k, sizeof(k), "c%d_name", i);
+        nvs_get_str_or(h, k, out->contact[i].name,
+                       sizeof(out->contact[i].name), "");
+        snprintf(k, sizeof(k), "c%d_cls", i);
+        nvs_get_str_or(h, k, out->contact[i].device_class,
+                       sizeof(out->contact[i].device_class), "");
+        snprintf(k, sizeof(k), "c%d_wire", i);
+        out->contact[i].wire = nvs_get_u8_or(h, k, CONTACT_TO_GND) == CONTACT_TO_3V3
+                                   ? CONTACT_TO_3V3 : CONTACT_TO_GND;
+        snprintf(k, sizeof(k), "c%d_rel", i);
+        out->contact[i].release_ms = nvs_get_u16_or(h, k, CONTACT_RELEASE_MS);
+    }
     nvs_close(h);
 }
 
@@ -274,6 +293,20 @@ bool sys_cfg_set(const sys_cfg_t *in)
     nvs_set_u16(h, "grid_ecu", in->grid_ecu);
     nvs_set_u16(h, "grid_w", in->grid_watts ? in->grid_watts : 2000);
     nvs_set_u16(h, "grid_min", in->grid_minutes ? in->grid_minutes : 15);
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        char k[16];
+        snprintf(k, sizeof(k), "c%d_on", i);
+        nvs_set_u8(h, k, in->contact[i].enabled ? 1 : 0);
+        snprintf(k, sizeof(k), "c%d_name", i);
+        nvs_set_str(h, k, in->contact[i].name);
+        snprintf(k, sizeof(k), "c%d_cls", i);
+        nvs_set_str(h, k, in->contact[i].device_class);
+        snprintf(k, sizeof(k), "c%d_wire", i);
+        nvs_set_u8(h, k, (uint8_t)in->contact[i].wire);
+        snprintf(k, sizeof(k), "c%d_rel", i);
+        nvs_set_u16(h, k, in->contact[i].release_ms ? in->contact[i].release_ms
+                                                    : CONTACT_RELEASE_MS);
+    }
     bool ok = nvs_commit(h) == ESP_OK;
     nvs_close(h);
     return ok;
