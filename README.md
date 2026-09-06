@@ -610,7 +610,9 @@ Einschalten unter *Einstellungen → Kontakteingänge*. Jeder aktive Eingang
 - und zeigt seinen Zustand samt Auslösezähler direkt in der Weboberfläche.
 
 Der Name bestimmt das Topic: „Klingel Haustür" wird zu
-`open3e/contact/klingel_haustuer`. Umbenennen verschiebt also das Topic.
+`open3e/contact/klingel_haustuer`. Umbenennen verschiebt also das Topic. Ohne
+Namen heißt der Eingang schlicht **Eingang 1** bzw. **Eingang 2** — die Pins
+sind generisch, der Standardname ist es auch.
 
 ### Verkabelung
 

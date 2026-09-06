@@ -114,8 +114,8 @@ int main(void)
         { "Klingel",           "klingel",           0 },
         { "Klingel Haustür",   "klingel_haustuer",  0 },
         { "Öl / Wasser",       "oel_wasser",        1 },
-        { "  ",                "in1",               0 },
-        { "",                  "in2",               1 },
+        { "  ",                "eingang_1",         0 },
+        { "",                  "eingang_2",         1 },
         { "Störung!!",         "stoerung",          0 },
         { "ÄÖÜß",              "aeoeuess",          0 },
     };

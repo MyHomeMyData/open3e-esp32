@@ -6,6 +6,7 @@
  */
 #include "contact.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* Connector order on the SH1.0 header: GND, 3V3, GPIO2, GPIO1. Indexed here
@@ -99,10 +100,22 @@ void contact_slug(const contact_cfg_t *cfg, int idx, char *out, size_t out_sz)
     }
     out[n] = '\0';
 
-    if (!n && out_sz >= 4) {
-        out[0] = 'i';
-        out[1] = 'n';
-        out[2] = (char)('1' + idx);
-        out[3] = '\0';
+    /* No name: the same fallback the entity gets in Home Assistant, so the
+     * two never disagree about what an unnamed input is called. */
+    if (!n) {
+        snprintf(out, out_sz, "%s", contact_default_name(idx));
+        for (char *q = out; *q; q++) {
+            if (*q == ' ') {
+                *q = '_';
+            } else if (*q >= 'A' && *q <= 'Z') {
+                *q = (char)(*q - 'A' + 'a');
+            }
+        }
     }
+}
+
+const char *contact_default_name(int idx)
+{
+    static const char *names[CONTACT_COUNT] = { "Eingang 1", "Eingang 2" };
+    return (idx >= 0 && idx < CONTACT_COUNT) ? names[idx] : "Eingang";
 }

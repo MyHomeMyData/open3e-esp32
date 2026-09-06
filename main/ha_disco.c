@@ -841,7 +841,8 @@ static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool cl
                      sys.contact[i].device_class);
         }
 
-        const char *name = sys.contact[i].name[0] ? sys.contact[i].name : object;
+        const char *name = sys.contact[i].name[0] ? sys.contact[i].name
+                                                  : contact_default_name(i);
         publish_extra_entity(cfg, dev_id, "binary_sensor", object, name, state,
                              extra, false);
     }

@@ -86,8 +86,12 @@ void contact_deb_reset(contact_deb_t *st, uint32_t now_ms);
 bool contact_deb_step(contact_deb_t *st, bool raw_active, uint32_t now_ms,
                       uint16_t release_ms);
 
+/* What an input is called when nobody has named it: deliberately generic,
+ * because the pins are generic. "Eingang 1", "Eingang 2". */
+const char *contact_default_name(int idx);
+
 /* Topic-safe name for one input: the configured name folded to lower case
- * with the German umlauts spelled out, or "in1"/"in2" when it has none.
+ * with the German umlauts spelled out, or the default name when it has none.
  * Renaming an input therefore moves its topic, which is the intended
  * behaviour -- the topic is meant to read like the thing it reports. */
 void contact_slug(const contact_cfg_t *cfg, int idx, char *out, size_t out_sz);
