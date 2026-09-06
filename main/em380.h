@@ -23,6 +23,7 @@ typedef struct {
     bool     seen;            /* at least one frame has arrived */
     uint32_t frames;          /* frames received since boot */
     uint32_t published;
+    uint32_t dropped;         /* the receive queue was full */
     uint32_t last_seen_ms;
     uint16_t ids_seen;        /* bitmask over EM380_CAN_FIRST..LAST */
 } em380_stats_t;

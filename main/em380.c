@@ -78,7 +78,9 @@ static bool on_frame(uint32_t id, const uint8_t *data, uint8_t len)
     memcpy(f.data, data, f.len);
 
     BaseType_t woken = pdFALSE;
-    xQueueSendFromISR(frame_q, &f, &woken);
+    if (xQueueSendFromISR(frame_q, &f, &woken) != pdTRUE) {
+        stats.dropped++;
+    }
     return woken == pdTRUE;
 }
 

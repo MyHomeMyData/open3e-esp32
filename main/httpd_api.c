@@ -92,60 +92,6 @@ static esp_err_t send_chunk_str(httpd_req_t *r, const char *s)
     return n ? httpd_resp_send_chunk(r, s, n) : ESP_OK;
 }
 
-/* Collects output and sends it in a few large pieces instead of many small
- * ones.
- *
- * The collect answer is some fifteen kilobytes across a hundred and thirty
- * fragments. Each fragment is its own send on a socket whose buffer is under
- * six kilobytes, and a send that cannot complete is an error the handler has
- * to abandon the response on. Buffering to a page at a time keeps the memory
- * bounded -- the point of streaming in the first place -- while asking far
- * less of the connection. */
-typedef struct {
-    httpd_req_t *req;
-    char         buf[1024];
-    size_t       len;
-    esp_err_t    err;
-} chunker_t;
-
-static void chunker_init(chunker_t *c, httpd_req_t *r)
-{
-    c->req = r;
-    c->len = 0;
-    c->err = ESP_OK;
-}
-
-static esp_err_t chunker_flush(chunker_t *c)
-{
-    if (c->err == ESP_OK && c->len) {
-        c->err = httpd_resp_send_chunk(c->req, c->buf, c->len);
-        if (c->err != ESP_OK) {
-            ESP_LOGW(TAG, "chunk of %u bytes failed: %s",
-                     (unsigned)c->len, esp_err_to_name(c->err));
-        }
-    }
-    c->len = 0;
-    return c->err;
-}
-
-static esp_err_t chunker_add(chunker_t *c, const char *s)
-{
-    while (c->err == ESP_OK && *s) {
-        size_t room = sizeof(c->buf) - c->len;
-        size_t n = strlen(s);
-        if (n > room) {
-            n = room;
-        }
-        memcpy(c->buf + c->len, s, n);
-        c->len += n;
-        s += n;
-        if (c->len == sizeof(c->buf)) {
-            chunker_flush(c);
-        }
-    }
-    return c->err;
-}
-
 static esp_err_t send_json(httpd_req_t *r, const char *json)
 {
     httpd_resp_set_type(r, "application/json");
@@ -358,6 +304,15 @@ static esp_err_t h_status(httpd_req_t *r)
              "\"published\": %u}, ",
              poll.active_points, (unsigned)poll.polls, (unsigned)poll.failures,
              (unsigned)poll.published);
+    o3e_buf_adds(&b, t);
+
+    raw_relay_stats_t rl;
+    raw_relay_stats(&rl);
+    snprintf(t, sizeof(t),
+             "\"raw\": {\"enabled\": %s, \"nIds\": %u, \"frames\": %u, "
+             "\"published\": %u, \"dropped\": %u}, ",
+             rl.enabled ? "true" : "false", rl.n_ids,
+             (unsigned)rl.frames, (unsigned)rl.published, (unsigned)rl.dropped);
     o3e_buf_adds(&b, t);
 
     o3e_buf_adds(&b, "\"contacts\": [");
@@ -661,9 +616,10 @@ static esp_err_t h_em380(httpd_req_t *r)
 
     snprintf(t, sizeof(t),
              "{\"enabled\": %s, \"seen\": %s, \"frames\": %u, \"published\": %u, "
+             "\"dropped\": %u, "
              "\"canFirst\": %u, \"canLast\": %u, \"frameList\": [",
              st.enabled ? "true" : "false", st.seen ? "true" : "false",
-             (unsigned)st.frames, (unsigned)st.published,
+             (unsigned)st.frames, (unsigned)st.published, (unsigned)st.dropped,
              EM380_CAN_FIRST, EM380_CAN_LAST);
     o3e_buf_adds(&b, t);
 
@@ -772,9 +728,10 @@ static esp_err_t h_collect(httpd_req_t *r)
     char t[192];
     snprintf(t, sizeof(t),
              "{\"enabled\": %s, \"messages\": %u, \"incomplete\": %u, "
-             "\"published\": %u, \"canIds\": [",
+             "\"dropped\": %u, \"published\": %u, \"canIds\": [",
              st.enabled ? "true" : "false", (unsigned)st.messages,
-             (unsigned)st.incomplete, (unsigned)st.published);
+             (unsigned)st.incomplete, (unsigned)st.dropped,
+             (unsigned)st.published);
     send_chunk_str(r, t);
     for (uint8_t k = 0; k < st.n_ids; k++) {
         snprintf(t, sizeof(t), "%s\"0x%03X\"", k ? "," : "", st.can_ids[k]);

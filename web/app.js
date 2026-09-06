@@ -136,6 +136,20 @@ function renderStatus(s) {
   /* The poll runs every five seconds and a doorbell press lasts one, so the
      state alone would rarely catch anything. The count is what actually
      confirms the wiring: press once, see it climb by one. */
+  /* Verworfene Frames sind das Einzige hier, was still schiefgeht: der
+     Empfang läuft weiter, nur mit Löchern. Deshalb hervorgehoben, sobald
+     der Zähler nicht mehr null ist. */
+  if (s.raw) {
+    const el = $("sys-rawstate");
+    if (el) {
+      el.textContent = !s.raw.enabled
+        ? "aus"
+        : `${s.raw.nIds} ID(s), ${s.raw.frames} Frames, ${s.raw.published} gesendet` +
+          (s.raw.dropped ? `, ${s.raw.dropped} verworfen` : "");
+      el.style.color = s.raw.dropped ? "var(--err)" : "";
+    }
+  }
+
   (s.contacts || []).forEach((c, i) => {
     const el = $(`ct${i}-state`);
     if (!el) return;
@@ -617,6 +631,7 @@ async function loadMeter() {
   $("em-state").textContent = !meter.enabled ? "aus (in den Einstellungen aktivieren)"
     : meter.seen ? "empfängt" : "wartet auf Frames";
   $("em-frames").textContent = meter.frames ?? "–";
+  $("em-drop").textContent = meter.dropped ?? "–";
   $("em-pub").textContent = meter.published ?? "–";
 
   const tbody = document.querySelector("#em-table tbody");
@@ -1014,6 +1029,7 @@ async function loadCollect() {
   /* "aus" rather than 0: the receiver being switched off and the bus being
      silent look identical in a counter, and only one of them is a setting. */
   $("co-msgs").textContent = c.enabled ? (c.messages ?? 0) : "Empfang aus";
+  $("co-drop").textContent = c.dropped ?? "–";
   $("co-bad").textContent = c.enabled ? (c.incomplete ?? 0) : "–";
 
   const tbody = document.querySelector("#co-table tbody");

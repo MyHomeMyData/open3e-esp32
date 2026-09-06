@@ -54,6 +54,7 @@ typedef struct {
     uint16_t can_ids[COLLECT_MAX_IDS];
     uint32_t messages;      /* complete messages reassembled */
     uint32_t incomplete;    /* started but never finished */
+    uint32_t dropped;       /* reassembled, but the queue was full */
     uint32_t published;
     uint16_t n_dids;        /* distinct identifiers seen */
     uint32_t last_ms;

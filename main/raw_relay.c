@@ -49,7 +49,11 @@ static bool on_frame(uint32_t id, const uint8_t *data, uint8_t len)
     memcpy(f.data, data, f.len);
 
     BaseType_t woken = pdFALSE;
-    xQueueSendFromISR(frame_q, &f, &woken);
+    if (xQueueSendFromISR(frame_q, &f, &woken) != pdTRUE) {
+        /* Only ever written here, in the interrupt, so no lock is needed --
+         * the reader is a single 32-bit load. */
+        stats.dropped++;
+    }
     return woken == pdTRUE;
 }
 
@@ -142,8 +146,12 @@ void raw_relay_stop(void)
     running = false;
     stats.enabled = false;
     vTaskDelay(pdMS_TO_TICKS(600));
-    vQueueDelete(frame_q);
+    /* Cleared before it is freed, not after: on_frame() tests this pointer,
+     * and the listener is already gone, but leaving a freed handle visible
+     * for a few instructions costs nothing to avoid. */
+    QueueHandle_t q = frame_q;
     frame_q = NULL;
+    vQueueDelete(q);
 }
 
 void raw_relay_stats(raw_relay_stats_t *out) { *out = stats; }

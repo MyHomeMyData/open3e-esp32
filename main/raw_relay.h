@@ -28,6 +28,11 @@ typedef struct {
     bool     enabled;
     uint32_t frames;
     uint32_t published;
+    /* Frames the interrupt could not hand over because the queue was full.
+     * Worth its own counter here more than anywhere else: this module exists
+     * to give a caller the bytes as they arrived, and a gap in that stream is
+     * indistinguishable from a quiet bus unless somebody counts it. */
+    uint32_t dropped;
     uint8_t  n_ids;
     uint16_t can_ids[RAW_RELAY_MAX_IDS];
 } raw_relay_stats_t;

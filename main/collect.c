@@ -125,7 +125,12 @@ static bool on_frame(uint32_t id, const uint8_t *d, uint8_t dlc)
         return false;
     }
     BaseType_t woken = pdFALSE;
-    xQueueSendFromISR(msg_q, &m, &woken);
+    if (xQueueSendFromISR(msg_q, &m, &woken) != pdTRUE) {
+        /* A message that was reassembled and then thrown away. Distinct from
+         * `incomplete`, which never became a message at all -- the two have
+         * different causes and only one of them is this device's own fault. */
+        stats.dropped++;
+    }
     return woken == pdTRUE;
 }
 

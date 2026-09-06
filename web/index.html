@@ -287,6 +287,8 @@
         <div class="v" id="co-msgs">–</div></div>
       <div class="kv" style="flex:0 0 auto"><div class="k">unvollständig</div>
         <div class="v" id="co-bad">–</div></div>
+      <div class="kv" style="flex:0 0 auto"><div class="k">verworfen</div>
+        <div class="v" id="co-drop">–</div></div>
     </div>
     <div class="tablewrap" style="margin-top:12px">
       <table id="co-table">
@@ -310,6 +312,7 @@
       <div class="kv"><div class="k">Status</div><div class="v" id="em-state">–</div></div>
       <div class="kv"><div class="k">Empfangene Frames</div><div class="v" id="em-frames">–</div></div>
       <div class="kv"><div class="k">Gesendet</div><div class="v" id="em-pub">–</div></div>
+      <div class="kv"><div class="k">Verworfen</div><div class="v" id="em-drop">–</div></div>
     </div>
   </div>
   <div class="card">
@@ -514,7 +517,8 @@
     <p class="small muted" style="margin:-4px 0 12px">Passiv. Jeder Frame dieser
       IDs geht unverändert nach <span class="mono">&lt;Basis&gt;/raw/&lt;id&gt;</span>,
       unabhängig von Datenpunkt-Auswahl und Auto-Discovery — für Software, die
-      selbst dekodiert. Höchstens 32 IDs.</p>
+      selbst dekodiert. Höchstens 32 IDs.<br>Zustand:
+      <span class="mono" id="sys-rawstate">–</span></p>
     <label class="small"><input type="checkbox" id="sys-em380"> E380-Energiezähler mitlesen (passiv)</label>
     <p class="small muted" style="margin:-4px 0 12px">Standardmäßig aus. Ohne
       angeschlossenen Zähler bringt es nichts und läuft nur im Empfangs-Interrupt mit.</p>
