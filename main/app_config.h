@@ -14,6 +14,7 @@
 #include <stdio.h>
 
 #include "contact.h"
+#include "knx.h"
 
 #define CFG_STR_MAX      64
 /* The 802.11 limits, so these buffers match the fields in wifi_config_t
@@ -96,6 +97,9 @@ typedef struct {
      * an unconfigured pin has nothing attached, and a pull-up on a bare pin
      * would report a permanently open contact. */
     contact_cfg_t contact[CONTACT_COUNT];
+    /* Off by default: an installation without KNX has nothing to send to, and
+     * a tunnel nobody asked for would occupy one of a gateway's few channels. */
+    knx_cfg_t     knx;
 } sys_cfg_t;
 
 bool app_config_init(void);          /* opens NVS and mounts LittleFS */

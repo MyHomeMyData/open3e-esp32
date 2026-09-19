@@ -45,12 +45,19 @@ typedef enum {
     CONTACT_TO_3V3,
 } contact_wire_t;
 
+#define CONTACT_GA_MAX     16
+
 typedef struct {
     bool           enabled;
     char           name[CONTACT_NAME_MAX];    /* shown in Home Assistant */
     char           device_class[CONTACT_CLASS_MAX];
     contact_wire_t wire;
     uint16_t       release_ms;
+    /* KNX group address, empty to send nothing. One bit, DPT 1.001: closed
+     * writes 1, open writes 0. Both are sent, because a group address that
+     * only ever receives a 1 stays at 1 -- the next reader of that address
+     * would see a doorbell permanently ringing. */
+    char           knx_ga[CONTACT_GA_MAX];
 } contact_cfg_t;
 
 /* ---- the debouncer ------------------------------------------------ */

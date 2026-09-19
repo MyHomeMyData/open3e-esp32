@@ -6,8 +6,8 @@ LDLIBS  := -lcjson -lm
 SRC     := ../main/o3e_json.c ../main/o3e_db.c ../main/o3e_codec.c
 FLAT    := ../main/o3e_flatten.c
 
-.PHONY: all clean codec encode flatten isotp uds em380 collect hadisco contact sanitize
-all: codec encode flatten em380 isotp uds collect hadisco contact
+.PHONY: all clean codec encode flatten isotp uds em380 collect hadisco contact knx sanitize
+all: codec encode flatten em380 isotp uds collect hadisco contact knx
 
 build:
 	@mkdir -p build
@@ -32,6 +32,12 @@ build/test_contact: build test_contact.c ../main/contact.c
 
 contact: build/test_contact
 	./build/test_contact
+
+build/test_knx: build test_knx.c ../main/knx_frame.c
+	$(CC) $(CFLAGS) -o $@ test_knx.c ../main/knx_frame.c
+
+knx: build/test_knx
+	./build/test_knx
 
 build/test_isotp: build test_isotp.c ../main/isotp.c
 	$(CC) $(CFLAGS) -o $@ test_isotp.c ../main/isotp.c -lpthread

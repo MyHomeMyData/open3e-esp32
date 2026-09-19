@@ -139,6 +139,19 @@ function renderStatus(s) {
   /* Verworfene Frames sind das Einzige hier, was still schiefgeht: der
      Empfang läuft weiter, nur mit Löchern. Deshalb hervorgehoben, sobald
      der Zähler nicht mehr null ist. */
+  if (s.knx) {
+    const el = $("knx-state");
+    if (el) {
+      el.textContent = !s.knx.enabled
+        ? "aus"
+        : (s.knx.connected ? `verbunden als ${s.knx.address}` : "nicht verbunden") +
+          `, ${s.knx.sent} gesendet` +
+          (s.knx.failures ? `, ${s.knx.failures} Fehler` : "") +
+          (s.knx.error ? ` \u2014 ${s.knx.error}` : "");
+      el.style.color = s.knx.enabled && s.knx.error ? "var(--err)" : "";
+    }
+  }
+
   if (s.raw) {
     const el = $("sys-rawstate");
     if (el) {
@@ -1118,7 +1131,14 @@ async function loadSettings() {
     $(`ct${i}-class`).value = c.deviceClass || "";
     $(`ct${i}-wire`).value = c.wire || "gnd";
     $(`ct${i}-rel`).value = c.releaseMs || 150;
+    $(`ct${i}-ga`).value = c.knxGa || "";
   });
+  const k = s.system.knx || {};
+  $("knx-on").checked = !!k.enabled;
+  $("knx-mode").value = k.mode || "tunnelling";
+  $("knx-gw").value = k.gateway || "";
+  $("knx-port").value = k.port || 3671;
+  $("knx-src").value = k.source || "";
   $("dbg-wstate").textContent =
     (s.system.writeEnabled
       ? "Schreiben ist freigegeben."
@@ -1151,7 +1171,15 @@ async function saveSettings() {
         deviceClass: $(`ct${i}-class`).value,
         wire: $(`ct${i}-wire`).value,
         releaseMs: Number($(`ct${i}-rel`).value) || 150,
+        knxGa: $(`ct${i}-ga`).value,
       })),
+      knx: {
+        enabled: $("knx-on").checked,
+        mode: $("knx-mode").value,
+        gateway: $("knx-gw").value,
+        port: Number($("knx-port").value) || 3671,
+        source: $("knx-src").value,
+      },
     },
   };
   /* Only send the password when one was actually typed, so the stored value
@@ -1294,6 +1322,7 @@ function initApp() {
 
   $("set-save").onclick = saveSettings;
   $("ct-save").onclick = saveSettings;
+  $("knx-save").onclick = saveSettings;
   $("crash-clear").onclick = async () => {
     try {
       await api("/api/crash", { method: "DELETE" });

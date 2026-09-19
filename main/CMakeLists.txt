@@ -15,6 +15,8 @@ idf_component_register(
         "ha_disco.c"
         "httpd_api.c"
         "isotp.c"
+        "knx.c"
+        "knx_frame.c"
         "mqtt_cmnd.c"
         "mqtt_pub.c"
         "net_prov.c"

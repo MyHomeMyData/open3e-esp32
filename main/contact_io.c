@@ -19,12 +19,16 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "knx.h"
 #include "mqtt_pub.h"
 
 static const char *TAG = "contact";
 
 static contact_cfg_t s_cfg[CONTACT_COUNT];
 static contact_deb_t s_deb[CONTACT_COUNT];
+/* Parsed once at configuration time rather than on every edge: a bad address
+ * should be reported when it is entered, not silently on a doorbell press. */
+static uint16_t      s_ga[CONTACT_COUNT];
 static TaskHandle_t  s_task;
 static volatile bool s_reload = true;
 
@@ -98,6 +102,12 @@ static void apply_cfg(void)
             continue;
         }
         contact_deb_reset(&s_deb[i], t);
+        s_ga[i] = 0;
+        if (s_cfg[i].knx_ga[0] && !knx_ga_parse(s_cfg[i].knx_ga, &s_ga[i])) {
+            ESP_LOGW(TAG, "GPIO%d: \"%s\" is not a group address",
+                     CONTACT_PINS[i], s_cfg[i].knx_ga);
+            s_ga[i] = 0;
+        }
         ESP_LOGI(TAG, "GPIO%d: \"%s\", contact to %s, release %u ms",
                  CONTACT_PINS[i], s_cfg[i].name[0] ? s_cfg[i].name : "(unnamed)",
                  s_cfg[i].wire == CONTACT_TO_GND ? "GND" : "3V3",
@@ -127,6 +137,12 @@ static void contact_task(void *arg)
                          s_cfg[i].name[0] ? s_cfg[i].name : "input",
                          s_deb[i].active ? "closed" : "open");
                 publish_one(i);
+                /* Queued, never sent from here: this loop samples every five
+                 * milliseconds and must not wait on a gateway that has been
+                 * unplugged. */
+                if (s_ga[i]) {
+                    knx_send_bool(s_ga[i], s_deb[i].active);
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(CONTACT_POLL_MS));

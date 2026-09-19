@@ -27,6 +27,7 @@
 #include "e3_scan.h"
 #include "em380.h"
 #include "hold.h"
+#include "knx.h"
 #include "ha_disco.h"
 #include "mqtt_pub.h"
 #include "net_prov.h"
@@ -314,6 +315,18 @@ static esp_err_t h_status(httpd_req_t *r)
              rl.enabled ? "true" : "false", rl.n_ids,
              (unsigned)rl.frames, (unsigned)rl.published, (unsigned)rl.dropped);
     o3e_buf_adds(&b, t);
+
+    knx_status_t kx;
+    knx_status(&kx);
+    snprintf(t, sizeof(t),
+             "\"knx\": {\"enabled\": %s, \"connected\": %s, \"sent\": %u, "
+             "\"failures\": %u, \"address\": \"%u.%u.%u\", \"error\": ",
+             kx.enabled ? "true" : "false", kx.connected ? "true" : "false",
+             (unsigned)kx.sent, (unsigned)kx.failures,
+             (kx.assigned >> 12) & 0x0F, (kx.assigned >> 8) & 0x0F, kx.assigned & 0xFF);
+    o3e_buf_adds(&b, t);
+    o3e_buf_add_json_str(&b, kx.last_error);
+    o3e_buf_adds(&b, "}, ");
 
     o3e_buf_adds(&b, "\"contacts\": [");
     for (int i = 0; i < CONTACT_COUNT; i++) {
@@ -1276,6 +1289,8 @@ static bool stream_file_inline(httpd_req_t *r, const char *path, const char *dfl
 static void copy_str(const cJSON *o, const char *key, char *dst, size_t dst_sz);
 static void contacts_to_json(o3e_buf_t *b, const sys_cfg_t *sys);
 static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys);
+static void knx_to_json(o3e_buf_t *b, const sys_cfg_t *sys);
+static void knx_from_json(const cJSON *o, sys_cfg_t *sys);
 
 static esp_err_t h_export(httpd_req_t *r)
 {
@@ -1349,6 +1364,8 @@ static esp_err_t h_export(httpd_req_t *r)
     o3e_buf_add_json_str(&b, sys.tz);
     o3e_buf_adds(&b, ", \"contacts\": ");
     contacts_to_json(&b, &sys);
+    o3e_buf_adds(&b, ", \"knx\": ");
+    knx_to_json(&b, &sys);
     o3e_buf_adds(&b, "}, \"points\": ");
 
     if (b.oom || !b.buf ||
@@ -1502,8 +1519,10 @@ static bool import_apply(const cJSON *root, char *err, size_t err_sz)
         }
         copy_str(js, "tz", sc.tz, sizeof(sc.tz));
         contacts_from_json(cJSON_GetObjectItem(js, "contacts"), &sc);
+        knx_from_json(cJSON_GetObjectItem(js, "knx"), &sc);
         sys_cfg_set(&sc);
         contact_start();
+        knx_start();
     }
 
     const cJSON *jp = cJSON_GetObjectItem(root, "points");
@@ -1576,6 +1595,8 @@ static esp_err_t h_settings_get(httpd_req_t *r)
     o3e_buf_add_json_str(&b, sys.tz);
     o3e_buf_adds(&b, ", \"contacts\": ");
     contacts_to_json(&b, &sys);
+    o3e_buf_adds(&b, ", \"knx\": ");
+    knx_to_json(&b, &sys);
     o3e_buf_adds(&b, ", \"hostname\": ");
     o3e_buf_add_json_str(&b, wifi.hostname);
     o3e_buf_adds(&b, "}}");
@@ -1611,12 +1632,53 @@ static void contacts_to_json(o3e_buf_t *b, const sys_cfg_t *sys)
         o3e_buf_add_json_str(b, sys->contact[i].name);
         o3e_buf_adds(b, ", \"deviceClass\": ");
         o3e_buf_add_json_str(b, sys->contact[i].device_class);
+        o3e_buf_adds(b, ", \"knxGa\": ");
+        o3e_buf_add_json_str(b, sys->contact[i].knx_ga);
         snprintf(t, sizeof(t), ", \"wire\": \"%s\", \"releaseMs\": %u}",
                  sys->contact[i].wire == CONTACT_TO_3V3 ? "3v3" : "gnd",
                  (unsigned)sys->contact[i].release_ms);
         o3e_buf_adds(b, t);
     }
     o3e_buf_adds(b, "]");
+}
+
+
+/* The KNX section, shared by the settings page and the backup. */
+static void knx_to_json(o3e_buf_t *b, const sys_cfg_t *sys)
+{
+    char t[64];
+    snprintf(t, sizeof(t), "{\"enabled\": %s, \"mode\": \"%s\", \"gateway\": ",
+             sys->knx.enabled ? "true" : "false",
+             sys->knx.mode == KNX_MODE_ROUTING ? "routing" : "tunnelling");
+    o3e_buf_adds(b, t);
+    o3e_buf_add_json_str(b, sys->knx.gateway);
+    snprintf(t, sizeof(t), ", \"port\": %u, \"source\": ", sys->knx.port);
+    o3e_buf_adds(b, t);
+    o3e_buf_add_json_str(b, sys->knx.source);
+    o3e_buf_adds(b, "}");
+}
+
+static void knx_from_json(const cJSON *o, sys_cfg_t *sys)
+{
+    if (!cJSON_IsObject(o)) {
+        return;
+    }
+    const cJSON *v;
+    if (cJSON_IsBool(v = cJSON_GetObjectItem(o, "enabled"))) {
+        sys->knx.enabled = cJSON_IsTrue(v);
+    }
+    if (cJSON_IsString(v = cJSON_GetObjectItem(o, "mode"))) {
+        sys->knx.mode = strcmp(v->valuestring, "routing") == 0
+                            ? KNX_MODE_ROUTING : KNX_MODE_TUNNELLING;
+    }
+    copy_str(o, "gateway", sys->knx.gateway, sizeof(sys->knx.gateway));
+    copy_str(o, "source", sys->knx.source, sizeof(sys->knx.source));
+    if (cJSON_IsNumber(v = cJSON_GetObjectItem(o, "port"))) {
+        sys->knx.port = (uint16_t)v->valuedouble;
+    }
+    if (!sys->knx.port) {
+        sys->knx.port = KNX_PORT;
+    }
 }
 
 static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys)
@@ -1636,6 +1698,8 @@ static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys)
         copy_str(o, "name", sys->contact[i].name, sizeof(sys->contact[i].name));
         copy_str(o, "deviceClass", sys->contact[i].device_class,
                  sizeof(sys->contact[i].device_class));
+        copy_str(o, "knxGa", sys->contact[i].knx_ga,
+                 sizeof(sys->contact[i].knx_ga));
         if (cJSON_IsString(v = cJSON_GetObjectItem(o, "wire"))) {
             sys->contact[i].wire = strcmp(v->valuestring, "3v3") == 0
                                        ? CONTACT_TO_3V3 : CONTACT_TO_GND;
@@ -1721,7 +1785,12 @@ static esp_err_t h_settings_put(httpd_req_t *r)
         contact_cfg_t contacts_was[CONTACT_COUNT];
         memcpy(contacts_was, sys.contact, sizeof(contacts_was));
         contacts_from_json(cJSON_GetObjectItem(js, "contacts"), &sys);
+        knx_cfg_t knx_was = sys.knx;
+        knx_from_json(cJSON_GetObjectItem(js, "knx"), &sys);
         sys_cfg_set(&sys);
+        if (memcmp(&knx_was, &sys.knx, sizeof(knx_was)) != 0) {
+            knx_start();
+        }
         /* Reconfigures the pins in place; enabling an input takes effect
          * without a restart, like every other setting on this page. */
         contact_start();

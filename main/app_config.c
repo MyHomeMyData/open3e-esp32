@@ -248,6 +248,7 @@ void sys_cfg_get(sys_cfg_t *out)
         for (int i = 0; i < CONTACT_COUNT; i++) {
             out->contact[i].release_ms = CONTACT_RELEASE_MS;
         }
+        out->knx.port = KNX_PORT;
         return;
     }
     out->write_enabled = nvs_get_u8_or(h, "wr_on", 0) != 0;
@@ -276,7 +277,16 @@ void sys_cfg_get(sys_cfg_t *out)
                                    ? CONTACT_TO_3V3 : CONTACT_TO_GND;
         snprintf(k, sizeof(k), "c%d_rel", i);
         out->contact[i].release_ms = nvs_get_u16_or(h, k, CONTACT_RELEASE_MS);
+        snprintf(k, sizeof(k), "c%d_ga", i);
+        nvs_get_str_or(h, k, out->contact[i].knx_ga,
+                       sizeof(out->contact[i].knx_ga), "");
     }
+    out->knx.enabled = nvs_get_u8_or(h, "knx_on", 0) != 0;
+    out->knx.mode = nvs_get_u8_or(h, "knx_mode", KNX_MODE_TUNNELLING)
+                        == KNX_MODE_ROUTING ? KNX_MODE_ROUTING : KNX_MODE_TUNNELLING;
+    nvs_get_str_or(h, "knx_gw", out->knx.gateway, sizeof(out->knx.gateway), "");
+    out->knx.port = nvs_get_u16_or(h, "knx_port", KNX_PORT);
+    nvs_get_str_or(h, "knx_src", out->knx.source, sizeof(out->knx.source), "");
     nvs_close(h);
 }
 
@@ -310,7 +320,14 @@ bool sys_cfg_set(const sys_cfg_t *in)
         snprintf(k, sizeof(k), "c%d_rel", i);
         nvs_set_u16(h, k, in->contact[i].release_ms ? in->contact[i].release_ms
                                                     : CONTACT_RELEASE_MS);
+        snprintf(k, sizeof(k), "c%d_ga", i);
+        nvs_set_str(h, k, in->contact[i].knx_ga);
     }
+    nvs_set_u8(h, "knx_on", in->knx.enabled ? 1 : 0);
+    nvs_set_u8(h, "knx_mode", (uint8_t)in->knx.mode);
+    nvs_set_str(h, "knx_gw", in->knx.gateway);
+    nvs_set_u16(h, "knx_port", in->knx.port ? in->knx.port : KNX_PORT);
+    nvs_set_str(h, "knx_src", in->knx.source);
     bool ok = nvs_commit(h) == ESP_OK;
     nvs_close(h);
     return ok;
