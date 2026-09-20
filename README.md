@@ -907,7 +907,14 @@ ebenfalls über das Web-UI erneuern:
 | *Datenbank aktualisieren* | ganze Partition (`build/storage.bin`) | 4 MB, Neustart |
 
 Der Datei-Weg ist der Alltagsfall, solange sich die Oberfläche noch täglich
-ändert: `app.js.gz` hochladen, Seite mit Strg+F5 neu laden, fertig. Das
+ändert: `app.js.gz` hochladen, Seite mit Strg+F5 neu laden, fertig.
+
+> **Nur die Oberfläche zu aktualisieren reicht nicht, wenn eine Funktion neu
+> ist.** Dann zeigt die Seite Bedienelemente, die die laufende Firmware nicht
+> kennt: eingetragene Werte verschwinden beim Speichern, und die Oberfläche
+> meldete trotzdem Erfolg. Genau das ist einmal passiert. Die Seite gleicht
+> deshalb jeden Abschnitt gegen das ab, was `/api/settings` wirklich liefert,
+> sperrt die Felder und schreibt hin, dass die Firmware zu alt ist. Das
 Partitionsabbild braucht man nur, wenn sich die Datenpunktdatenbank geändert
 hat — es **löscht dabei Auswahl und Scan-Ergebnis**, weil die auf derselben
 Partition liegen. WLAN und MQTT überleben, die stehen im NVS.

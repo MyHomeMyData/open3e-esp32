@@ -1377,6 +1377,60 @@ function renderEvcc() {
 /* ------------------------------------------------------------------ */
 /* Settings                                                            */
 
+/* Oberfläche und Firmware werden getrennt aktualisiert -- der Dateiweg für die
+   Weboberfläche ist laut README der Alltagsfall. Damit kann die Seite
+   Bedienelemente für Funktionen zeigen, die die laufende Firmware nicht hat.
+   Das ist genau einmal passiert und sah aus wie ein Fehler der Oberfläche:
+   Kontaktname eintragen, "Einstellungen gespeichert", neu laden, Feld leer.
+   Also wird jeder Abschnitt gegen das abgeglichen, was /api/settings
+   tatsächlich liefert -- fehlt er dort, kann die Firmware ihn nicht. */
+const CAPS = {};
+
+function markUnsupported(cardId, present, what) {
+  CAPS[cardId] = present;
+  const card = $(cardId);
+  if (!card) return;
+  let note = card.querySelector(".cap-note");
+  if (present) {
+    if (note) note.remove();
+    for (const el of card.querySelectorAll("input,select,button")) el.disabled = false;
+    return;
+  }
+  if (!note) {
+    note = document.createElement("div");
+    note.className = "warnbox cap-note";
+    note.innerHTML = `<b>Diese Firmware kennt ${what} nicht.</b> Die Felder unten
+      sind deshalb gesperrt — eingetragene Werte würden beim Speichern
+      stillschweigend verworfen. Unter <i>Debug → Firmware-Update</i>
+      aktualisieren.`;
+    card.insertBefore(note, card.querySelector("h2").nextSibling);
+  }
+  for (const el of card.querySelectorAll("input,select,button")) el.disabled = true;
+}
+
+function markFieldsUnsupported(ids, present, noteId, text) {
+  CAPS[noteId] = present;
+  let note = $(noteId);
+  for (const id of ids) {
+    const el = $(id);
+    if (el) el.disabled = !present;
+  }
+  if (present) {
+    if (note) note.remove();
+    return;
+  }
+  if (!note) {
+    const anchor = $(ids[0]);
+    if (!anchor) return;
+    note = document.createElement("p");
+    note.id = noteId;
+    note.className = "small";
+    note.style.color = "var(--warn)";
+    note.textContent = text + " Die Felder sind gesperrt; Firmware aktualisieren.";
+    (anchor.closest("label") || anchor).insertAdjacentElement("afterend", note);
+  }
+}
+
 async function loadSettings() {
   const s = await api("/api/settings");
   $("mq-enabled").checked = s.mqtt.enabled;
@@ -1396,6 +1450,13 @@ async function loadSettings() {
   $("co-on").checked = s.system.collectEnabled;
   $("co-id").value = s.system.collectCanIds || "0x451,0x441";
   $("sys-tz").value = s.system.tz;
+  /* Die rohe API sitzt mitten in der System-Karte zwischen Feldern, die jede
+     Firmware kennt -- also einzeln sperren statt die ganze Karte. */
+  markFieldsUnsupported(["sys-rawwrite", "sys-rawids"],
+                        "rawWriteEnabled" in s.system, "raw-note",
+                        "Rohes Schreiben und das Roh-Relay kennt diese Firmware nicht.");
+  markUnsupported("card-contacts", "contacts" in s.system, "die Kontakteingänge");
+  markUnsupported("card-knx", "knx" in s.system, "KNX");
   renderEvcc();
   (s.system.contacts || []).forEach((c, i) => {
     if (!$(`ct${i}-on`)) return;
@@ -1434,25 +1495,27 @@ async function saveSettings() {
     },
     system: {
       writeEnabled: $("sys-write").checked,
-      rawWriteEnabled: $("sys-rawwrite").checked,
-      rawCanIds: $("sys-rawids").value,
+      ...(CAPS["raw-note"] === false ? {} : {
+        rawWriteEnabled: $("sys-rawwrite").checked,
+        rawCanIds: $("sys-rawids").value,
+      }),
       em380Enabled: $("sys-em380").checked,
       tz: $("sys-tz").value,
-      contacts: [0, 1].map((i) => ({
+      ...(CAPS["card-contacts"] === false ? {} : { contacts: [0, 1].map((i) => ({
         enabled: $(`ct${i}-on`).checked,
         name: $(`ct${i}-name`).value,
         deviceClass: $(`ct${i}-class`).value,
         wire: $(`ct${i}-wire`).value,
         releaseMs: Number($(`ct${i}-rel`).value) || 150,
         knxGa: $(`ct${i}-ga`).value,
-      })),
-      knx: {
+      })) }),
+      ...(CAPS["card-knx"] === false ? {} : { knx: {
         enabled: $("knx-on").checked,
         mode: $("knx-mode").value,
         gateway: $("knx-gw").value,
         port: Number($("knx-port").value) || 3671,
         source: $("knx-src").value,
-      },
+      } }),
     },
   };
   /* Only send the password when one was actually typed, so the stored value
