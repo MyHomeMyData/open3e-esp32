@@ -192,21 +192,33 @@ function renderStatus(s) {
      overriding the installation's own regulation should not be easy to
      forget about. */
   const g = s.grid || {};
+  /* "Aktiv, aber noch nie geschrieben" ist der Zustand, der wie Erfolg
+     aussieht und keiner ist: eine falsche ECU-Adresse lässt den Hold starten,
+     jeden Schreibvorgang scheitern und ihn nach fünf Versuchen verschwinden.
+     Das hat hier einmal zwanzig Minuten Suche gekostet, weil nur "aktiv"
+     dastand. */
+  const nowrite = (active, writes) => active && !writes;
   const gs = $("gh-state");
   if (gs) {
     gs.textContent = g.active
       ? `Aktiv: ${g.watts} W, noch ${fmtDuration(g.remainingS)}`
         + ` · ${g.writes} Schreibvorgänge` + (g.failures ? `, ${g.failures} Fehler` : "")
+        + (nowrite(g.active, g.writes) ? " — noch kein Schreibvorgang gelungen, ECU-Adresse prüfen" : "")
       : "Nicht aktiv — die Anlage regelt selbst.";
-    gs.style.color = g.active ? "var(--warn)" : "var(--muted)";
+    gs.style.color = nowrite(g.active, g.writes) ? "var(--err)"
+                   : g.active ? "var(--warn)" : "var(--muted)";
   }
   const ss = $("sh-state");
   if (ss) {
     const held = g.storage && g.storage !== "normal";
+    const bad = nowrite(held, g.storageWrites);
     ss.textContent = held
       ? `Aktiv: ${g.storage}, noch ${fmtDuration(g.storageRemainingS)}`
+        + ` · ${g.storageWrites ?? 0} Schreibvorgänge`
+        + (g.storageFailures ? `, ${g.storageFailures} Fehler` : "")
+        + (bad ? " — noch kein Schreibvorgang gelungen, ECU-Adresse prüfen" : "")
       : "Nicht gehalten — der Manager entscheidet.";
-    ss.style.color = held ? "var(--warn)" : "var(--muted)";
+    ss.style.color = bad ? "var(--err)" : held ? "var(--warn)" : "var(--muted)";
   }
   /* Sensors and controls apart: a datapoint that is read-only and one whose
      control never got published look identical from the outside. */
@@ -440,6 +452,9 @@ async function loadPoints() {
     [p.type === "em380" ? `em:${p.canId}`
      : p.type === "collect" ? `co:${p.did}`
      : pointKey(p.ecu, p.did), p]));
+  /* Die evcc-Konfiguration hängt an genau dieser Auswahl, also mitziehen --
+     auch wenn die Karte auf einem anderen Reiter liegt. */
+  if (typeof renderEvcc === "function") renderEvcc();
 }
 
 function currentEcu() {
@@ -626,6 +641,7 @@ async function saveSelection(btn) {
        silently discard the other. */
     await api("/api/points", { method: "PUT", body: JSON.stringify([...selection.values()]) });
     toast(`${selection.size} Einträge gespeichert.`, "ok");
+    renderEvcc();
   } catch (e) {
     toast(e.message, "err");
   } finally {
@@ -1103,6 +1119,262 @@ async function loadCollect() {
 }
 
 /* ------------------------------------------------------------------ */
+/* evcc                                                                */
+
+/* Which datapoint delivers which value evcc wants.
+ *
+ * A curated table, not a derivation: the open3e database carries neither the
+ * field names nor the sign conventions, so both were read off a running
+ * Vitocharge VX3 and are pinned here.
+ *
+ * `field` is null for a datapoint that is a bare scalar -- those publish at
+ * their own topic in flat mode and as a plain JSON value in json mode, so
+ * there is nothing to pick out of them. */
+const EVCC_ROLES = [
+  { key: "grid", did: 1603, field: "ActivePower", usage: "grid",
+    label: "Netzleistung", name: "PointOfCommonCouplingPower" },
+  /* The AC side, and already summed over the strings -- measured as
+     3742 + 1776 = 5518 W. DID 1831 is the DC input per string (three of them
+     on the installation this was checked against, not the two the database
+     comment suggests), which would need adding up and would read high by the
+     inverter's own losses. */
+  { key: "pv", did: 1690, field: "ActivePower cumulated", usage: "pv",
+    label: "PV-Leistung", name: "ElectricalEnergySystemPhotovoltaicStatus" },
+  { key: "battery", did: 1836, field: null, usage: "battery",
+    label: "Speicherleistung", name: "ElectricalEnergyStorageCurrentPower" },
+  { key: "soc", did: 1664, field: null, usage: "battery",
+    label: "Ladestand", name: "ElectricalEnergyStorageStateOfCharge" },
+];
+
+/* @topic-expansion-start
+   Mirror of mqtt_pub_topic() in main/mqtt_pub.c. That function is the
+   authority; this exists because the generated configuration has to name the
+   exact topics the firmware publishes to, and the browser already holds
+   everything needed to work them out. test/test_topic.js keeps the two from
+   drifting apart -- a mismatch here produces a configuration evcc accepts and
+   then silently never fills. */
+function expandTopic(base, format, ecu, did, didName, device, override) {
+  /* A per-datapoint override replaces the formatted part, not the base. */
+  if (override) return `${base}/${override}`;
+
+  let out = `${base}/`;
+  const f = format || "{didName}";
+  for (let i = 0; i < f.length; ) {
+    if (f[i] !== "{") { out += f[i++]; continue; }
+    const close = f.indexOf("}", i);
+    const body = close < 0 ? "" : f.slice(i + 1, close);
+    const colon = body.indexOf(":");
+    const name = colon < 0 ? body : body.slice(0, colon);
+    const spec = colon < 0 ? "" : body.slice(colon + 1);
+    let sub = null;
+    if (close < 0) { out += f[i++]; continue; }
+    if (name === "didName") {
+      sub = didName || "";
+    } else if (name === "didNumber") {
+      /* The documented spec is {didNumber:04d}; any 0-prefixed spec is a
+         zero-padded width. */
+      const width = spec.startsWith("0") ? parseInt(spec, 10) || 0 : 0;
+      sub = String(did).padStart(width, "0");
+    } else if (name === "ecuAddr") {
+      if (spec.includes("X")) sub = ecu.toString(16).toUpperCase().padStart(3, "0");
+      else if (spec.includes("x")) sub = ecu.toString(16).padStart(3, "0");
+      else sub = String(ecu);            /* open3e's plain int */
+    } else if (name === "device") {
+      sub = device || "";
+    }
+    /* An unknown placeholder is copied through, so a typo shows up in the
+       topic instead of vanishing -- same as the firmware does. */
+    if (sub === null) { out += f[i++]; continue; }
+    out += sub;
+    i = close + 1;
+  }
+  return out;
+}
+/* @topic-expansion-end */
+
+/* Where one role's value actually lands, and how to pick it out. */
+/* Aus den Eingabefeldern, nicht aus dem letzten Speichern: so zeigt der
+   Erzeuger, was mit den gerade eingetragenen Einstellungen herauskäme. */
+function mqttField(id, dflt) {
+  const el = $(id);
+  return (el && el.value) ? el.value : dflt;
+}
+
+function evccSource(role, cfg, didName, device) {
+  const base = mqttField("mq-base", "open3e");
+  const topic = expandTopic(base, mqttField("mq-format", "{didName}"),
+                            cfg.ecu, role.did, didName, device, cfg.topic);
+  if (cfg.mode === "flat") {
+    /* Every scalar leaf is its own topic with a bare value; a datapoint that
+       is itself a scalar publishes at the topic directly. */
+    return { topic: role.field ? `${topic}/${role.field}` : topic, jq: null };
+  }
+  /* json: one topic per datapoint. A complex type is an object, a scalar is a
+     plain JSON value with nothing to select. */
+  const jq = role.field
+    ? (/[^A-Za-z0-9_]/.test(role.field) ? `."${role.field}"` : `.${role.field}`)
+    : null;
+  return { topic, jq };
+}
+
+function yamlStr(s) { return `"${String(s).replace(/"/g, '\\"')}"`; }
+
+function evccConfig() {
+  const found = [], missing = [];
+  for (const role of EVCC_ROLES) {
+    let hit = null;
+    for (const cfg of selection.values()) {
+      if (cfg.did === role.did && cfg.enabled && !cfg.type) { hit = cfg; break; }
+    }
+    if (!hit) { missing.push(role); continue; }
+    const dev = (system.devices || []).find((d) => d.addr === hit.ecu);
+    const src = evccSource(role, hit, didNames[role.did] || role.name,
+                           dev ? dev.name : "");
+    /* Three poll intervals, so a single missed reading does not make evcc
+       drop the value -- floored at a minute because evcc re-reads far more
+       often than this gateway polls. */
+    const timeout = Math.max(60, (Number(hit.interval) || 60) * 3);
+    found.push({ role, cfg: hit, ...src, timeout });
+  }
+  return { found, missing };
+}
+
+function evccYaml() {
+  const { found, missing } = evccConfig();
+  const get = (k) => found.find((f) => f.role.key === k);
+  const grid = get("grid"), pv = get("pv"), bat = get("battery"), soc = get("soc");
+  const cmnd = mqttField("mq-cmnd", "open3e/cmnd");
+  const L = [];
+
+  const reading = (f, indent) => {
+    const p = " ".repeat(indent);
+    L.push(`${p}source: mqtt`);
+    L.push(`${p}topic: ${yamlStr(f.topic)}`);
+    if (f.jq) L.push(`${p}jq: ${yamlStr(f.jq)}`);
+    L.push(`${p}timeout: ${f.timeout}s`);
+  };
+
+  L.push("# Von diesem Gateway erzeugt. Topics und Feldnamen stammen aus der");
+  L.push("# tatsächlichen Datenpunkt-Auswahl dieses Geräts, nicht aus einer Vorlage.");
+  L.push("#");
+  L.push("# Vorzeichen: evcc erwartet positiv für einströmend -- Netzbezug,");
+  L.push("# PV-Erzeugung, Speicherentladung. Die Datenpunkte der VX3 halten sich");
+  L.push("# daran, deshalb steht nirgends ein scale: -1.");
+  if (missing.length) {
+    L.push("#");
+    L.push("# FEHLT: " + missing.map((r) => `${r.label} (DID ${r.did})`).join(", "));
+    L.push("# Diese Datenpunkte sind nicht aktiv -- unter Datenpunkte einschalten,");
+    L.push("# dann erscheinen sie hier von selbst.");
+  }
+  L.push("");
+  L.push("meters:");
+
+  if (grid) {
+    L.push("  - name: vx3grid");
+    L.push("    type: custom");
+    L.push("    power:");
+    reading(grid, 6);
+  }
+  if (pv) {
+    L.push("  - name: vx3pv");
+    L.push("    type: custom");
+    L.push("    power:");
+    reading(pv, 6);
+  }
+  if (bat || soc) {
+    L.push("  - name: vx3battery");
+    L.push("    type: custom");
+    if (bat) { L.push("    power:"); reading(bat, 6); }
+    if (soc) { L.push("    soc:"); reading(soc, 6); }
+    if (bat && soc) {
+      /* Ausdrücklich, statt sich auf den Speicher-ECU aus den
+         Systemeinstellungen zu verlassen: ist der nicht gesetzt, landet der
+         Befehl auf der Vorgabe 0x680, und die trägt auf einer Anlage mit
+         Wärmepumpe keinen der beiden Datenpunkte. Der Hold meldet sich dann
+         als aktiv, schreibt nie, und verschwindet nach fünf Fehlversuchen.
+         An einer laufenden Anlage nachgemessen. */
+      const addr = "0x" + bat.cfg.ecu.toString(16).toUpperCase().padStart(3, "0");
+      L.push("");
+      L.push("    # Steuerung. evcc ruft batteryMode mit einer Zahl auf:");
+      L.push("    # 1 = normal, 2 = hold (nicht entladen), 3 = charge (aus dem Netz).");
+      L.push("    #");
+      L.push(`    # Die Adresse ${addr} steht ausdrücklich in jeder Nutzlast: ohne sie`);
+      L.push("    # geht der Befehl an die Vorgabe 0x680, die diese Datenpunkte nicht");
+      L.push("    # hat -- der Hold meldet sich dann aktiv, schreibt nie und ist nach");
+      L.push("    # fünf Fehlversuchen weg.");
+      L.push("    #");
+      L.push("    # Der watchdog ist nicht optional: evcc schickt batteryMode nur bei");
+      L.push("    # Änderung, und ein Hold in diesem Gateway endet nach höchstens einer");
+      L.push("    # Stunde von selbst -- absichtlich, damit nichts unbeaufsichtigt");
+      L.push("    # weiterläuft. Alle 10 Minuten nachschreiben hält den Hold am Leben");
+      L.push("    # und lässt die Frist trotzdem greifen, wenn evcc verschwindet.");
+      L.push("    batterymodes: [normal, hold, charge]");
+      L.push("    batterymode:");
+      L.push("      source: watchdog");
+      L.push("      timeout: 20m");
+      L.push("      reset: 1");
+      L.push("      set:");
+      L.push("        source: switch");
+      L.push("        switch:");
+      const cases = [
+        [1, "normal -- Hold beenden, die Anlage regelt wieder selbst",
+         `{"mode":"grid","addr":"${addr}","stop":true}`],
+        [2, "hold -- nicht entladen, PV-Laden bleibt erlaubt",
+         `{"mode":"storage","addr":"${addr}","storage":"nur laden","seconds":3600}`],
+        [3, "charge -- aus dem Netz laden; Leistung nach Bedarf ändern",
+         `{"mode":"grid","addr":"${addr}","watts":-2000,"seconds":3600}`],
+      ];
+      for (const [n, why, payload] of cases) {
+        L.push(`          # ${why}`);
+        L.push(`          - case: ${n}`);
+        L.push("            set:");
+        L.push("              source: mqtt");
+        L.push(`              topic: ${yamlStr(cmnd)}`);
+        L.push(`              payload: '${payload}'`);
+      }
+    }
+  }
+
+  L.push("");
+  L.push("site:");
+  L.push("  meters:");
+  if (grid) L.push("    grid: vx3grid");
+  if (pv) L.push("    pv:\n      - vx3pv");
+  if (bat || soc) L.push("    battery:\n      - vx3battery");
+  return L.join("\n") + "\n";
+}
+
+function renderEvcc() {
+  const out = $("evcc-yaml");
+  if (!out) return;
+  const { found, missing } = evccConfig();
+  out.textContent = found.length ? evccYaml()
+    : "Kein passender Datenpunkt aktiv – siehe unten.";
+
+  const st = $("evcc-status");
+  st.innerHTML = "";
+  for (const role of EVCC_ROLES) {
+    const f = found.find((x) => x.role.key === role.key);
+    const li = document.createElement("div");
+    li.className = "kv";
+    li.innerHTML = `<div class="k">${role.label}</div><div class="v ${f ? "" : "muted"}">`
+      + (f ? `DID ${role.did} ✓` : `DID ${role.did} fehlt`) + "</div>";
+    st.appendChild(li);
+  }
+  const hint = $("evcc-missing");
+  hint.hidden = missing.length === 0;
+  if (missing.length) {
+    hint.innerHTML = "Nicht aktiv: "
+      + missing.map((r) => `<b>${r.label}</b> – DID ${r.did} <span class="mono">${r.name}</span>`).join(", ")
+      + ". Unter <i>Datenpunkte</i> einschalten und speichern, dann erscheint der Block hier von selbst.";
+  }
+  const ctl = $("evcc-control");
+  const hasBoth = found.some((f) => f.role.key === "battery")
+               && found.some((f) => f.role.key === "soc");
+  ctl.hidden = hasBoth;
+}
+
+/* ------------------------------------------------------------------ */
 /* Settings                                                            */
 
 async function loadSettings() {
@@ -1124,6 +1396,7 @@ async function loadSettings() {
   $("co-on").checked = s.system.collectEnabled;
   $("co-id").value = s.system.collectCanIds || "0x451,0x441";
   $("sys-tz").value = s.system.tz;
+  renderEvcc();
   (s.system.contacts || []).forEach((c, i) => {
     if (!$(`ct${i}-on`)) return;
     $(`ct${i}-on`).checked = c.enabled;
@@ -1323,6 +1596,19 @@ function initApp() {
   $("set-save").onclick = saveSettings;
   $("ct-save").onclick = saveSettings;
   $("knx-save").onclick = saveSettings;
+  $("evcc-copy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($("evcc-yaml").textContent);
+      toast("Kopiert.", "ok");
+    } catch (e) {
+      /* Ohne HTTPS gibt es keine Ablage-API; dann markieren statt scheitern. */
+      const r = document.createRange();
+      r.selectNodeContents($("evcc-yaml"));
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(r);
+      toast("Markiert – mit Strg+C kopieren.", "warn");
+    }
+  };
   $("crash-clear").onclick = async () => {
     try {
       await api("/api/crash", { method: "DELETE" });

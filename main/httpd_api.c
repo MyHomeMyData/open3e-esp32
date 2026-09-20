@@ -292,12 +292,14 @@ static esp_err_t h_status(httpd_req_t *r)
              "\"haSensors\": %d, \"haControls\": %d}, "
              "\"grid\": {\"active\": %s, \"watts\": %d, \"remainingS\": %u, "
              "\"writes\": %u, \"failures\": %u, \"storage\": \"%s\", "
-             "\"storageRemainingS\": %u}, ",
+             "\"storageRemainingS\": %u, \"storageWrites\": %u, "
+             "\"storageFailures\": %u}, ",
              mq.connected ? "true" : "false", (unsigned)mq.published,
              (unsigned)mq.errors, ha_sensors, ha_controls,
              gh.active ? "true" : "false", gh.watts, (unsigned)gh.remaining_s,
              (unsigned)gh.writes, (unsigned)gh.failures,
-             storage_mode_name(sh.mode), (unsigned)sh.remaining_s);
+             storage_mode_name(sh.mode), (unsigned)sh.remaining_s,
+             (unsigned)sh.writes, (unsigned)sh.failures);
     o3e_buf_adds(&b, t);
 
     snprintf(t, sizeof(t),

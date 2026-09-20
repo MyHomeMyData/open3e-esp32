@@ -346,6 +346,7 @@ void storage_hold_status(storage_hold_status_t *out)
     out->remaining_s = (s->active && left > 0) ? (uint32_t)(left / 1000000) : 0;
     out->writes = s->writes;
     out->failures = s->fails;
+    snprintf(out->last_error, sizeof(out->last_error), "%s", s->last_error);
     xSemaphoreGive(lock);
 }
 
@@ -373,10 +374,12 @@ void hold_publish(void)
     snprintf(payload, sizeof(payload),
              "{\"active\": %s, \"power\": %u, \"minutes\": %u, "
              "\"remainingS\": %u, \"writes\": %u, \"failures\": %u, "
-             "\"storage\": \"%s\", \"storageRemainingS\": %u}",
+             "\"storage\": \"%s\", \"storageRemainingS\": %u, "
+             "\"storageWrites\": %u, \"storageFailures\": %u}",
              g.active ? "true" : "false",
              (unsigned)sys.grid_watts, (unsigned)sys.grid_minutes,
              (unsigned)g.remaining_s, (unsigned)g.writes, (unsigned)g.failures,
-             storage_mode_name(s.mode), (unsigned)s.remaining_s);
+             storage_mode_name(s.mode), (unsigned)s.remaining_s,
+             (unsigned)s.writes, (unsigned)s.failures);
     mqtt_pub_raw(topic, payload, true);
 }

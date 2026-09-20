@@ -621,6 +621,30 @@
   </div>
 
   <div class="card">
+    <h2>evcc</h2>
+    <p class="hint">evcc kann die Werte dieses Gateways über sein MQTT-Plugin lesen
+      <b>und den Speicher steuern</b> — dafür braucht es kein EEBUS. Der Block unten
+      ist aus der tatsächlichen Datenpunkt-Auswahl dieses Geräts erzeugt, nicht aus
+      einer Vorlage: Topics, Feldnamen und Zeitfenster stimmen also mit dem überein,
+      was die Firmware wirklich veröffentlicht.</p>
+    <div class="grid" id="evcc-status"></div>
+    <p class="hint" id="evcc-missing" hidden></p>
+    <p class="hint" id="evcc-control" hidden>Für die <b>Steuerung</b> braucht evcc
+      Leistung <i>und</i> Ladestand des Speichers. Fehlt einer von beiden, wird nur
+      gelesen.</p>
+    <div class="warnbox">
+      Die Steuerung setzt <b>Schreiben freigeben</b> voraus, und der Speicher-ECU muss
+      unter <i>Aus dem Netz laden</i> eingetragen sein — sonst weiß das Gateway nicht,
+      an welches Gerät der Befehl geht.
+    </div>
+    <pre class="mono" id="evcc-yaml" style="max-height:420px;overflow:auto;white-space:pre;
+      background:var(--bg2,#00000010);padding:12px;border-radius:6px;font-size:12px">–</pre>
+    <div class="row">
+      <button class="btn" id="evcc-copy" style="flex:0 0 auto">In die Ablage kopieren</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>KNX</h2>
     <p class="hint">Schickt beim Schalten eines Kontakteingangs ein 1-Bit-Telegramm
       (DPT 1.001) auf eine Gruppenadresse — geschlossen sendet 1, offen sendet 0.

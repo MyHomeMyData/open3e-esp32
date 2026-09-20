@@ -127,6 +127,7 @@ typedef struct {
     uint32_t       remaining_s;
     uint32_t       writes;
     uint32_t       failures;
+    char           last_error[96];
 } storage_hold_status_t;
 
 /* `watts` is negative to draw from the grid, positive to feed in. Fails, with
