@@ -103,6 +103,16 @@ static bool slot_start(int idx, uint16_t ecu, uint16_t did,
 
 static void slot_stop(int idx)
 {
+    /* Ohne Mutex hat nie ein Hold begonnen, also gibt es auch nichts zu
+     * beenden. Diese Prüfung fehlte, und das war kein theoretischer Fall:
+     * xSemaphoreTake(NULL) ist in FreeRTOS ein configASSERT und damit ein
+     * Panic. Erreichbar über {"mode":"grid","stop":true} auf dem
+     * Kommando-Topic und über POST /api/grid -- also von jedem, der den
+     * Broker erreicht, auf einem frisch gestarteten Gerät. Die erzeugte
+     * evcc-Konfiguration schickt genau das für batterymode "normal". */
+    if (!lock) {
+        return;
+    }
     xSemaphoreTake(lock, portMAX_DELAY);
     bool was = slots[idx].active;
     slots[idx].active = false;
@@ -182,6 +192,11 @@ static void hold_task(void *arg)
 
 static bool ensure_task(char *err, size_t err_sz)
 {
+    /* hold_init() legt den Mutex beim Start an; das hier bleibt als Rückfall
+     * stehen, falls jemand das Modul ohne Initialisierung benutzt. Träge
+     * erzeugt war er ursprünglich allein -- zwei Tasks hätten ihn dann
+     * gleichzeitig anlegen können, und wer zuletzt schreibt, lässt den
+     * anderen auf einem Mutex warten, den niemand mehr freigibt. */
     if (!lock) {
         lock = xSemaphoreCreateMutex();
         if (!lock) {
@@ -236,6 +251,13 @@ bool grid_hold_start(uint16_t ecu, int16_t w, uint32_t seconds,
     grid_watts = w;
     return slot_start(SLOT_GRID, ecu, GRID_HOLD_DID, b, sizeof(b), seconds,
                       err, err_sz);
+}
+
+void hold_init(void)
+{
+    if (!lock) {
+        lock = xSemaphoreCreateMutex();
+    }
 }
 
 void grid_hold_stop(void) { slot_stop(SLOT_GRID); }

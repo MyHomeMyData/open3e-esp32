@@ -130,6 +130,11 @@ typedef struct {
     char           last_error[96];
 } storage_hold_status_t;
 
+/* Legt den Mutex an, bevor irgendetwas Befehle entgegennehmen kann. Beim
+ * Start aufzurufen: ein Stopp-Befehl, der vor dem ersten Hold eintrifft,
+ * fand sonst keinen Mutex vor und löste einen Panic aus. */
+void hold_init(void);
+
 /* `watts` is negative to draw from the grid, positive to feed in. Fails, with
  * a reason, on a value or duration beyond the caps, or when writing to the bus
  * is switched off in the system settings. Starting again replaces a running

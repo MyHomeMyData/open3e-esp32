@@ -22,6 +22,7 @@
 #include "cantrace.h"
 #include "contact.h"
 #include "em380.h"
+#include "hold.h"
 #include "httpd_api.h"
 #include "knx.h"
 #include "mqtt_pub.h"
@@ -107,6 +108,11 @@ void app_main(void)
     if (!can_port_start()) {
         ESP_LOGE(TAG, "CAN interface did not come up");
     }
+
+    /* Vor dem Webserver und vor MQTT: beide nehmen Befehle entgegen, die den
+     * Hold beenden wollen, und das darf nicht auf einen fehlenden Mutex
+     * treffen. */
+    hold_init();
 
     net_prov_start();
     httpd_api_start();
