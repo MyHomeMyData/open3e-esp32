@@ -1,5 +1,5 @@
 open3e-gateway
-Copyright 2026
+Copyright 2026 Thomas Peterson
 
 This firmware speaks the protocol of, and derives its datapoint database from,
 the open3e project:

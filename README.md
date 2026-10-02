@@ -938,6 +938,13 @@ Dienst und protokolliert das, statt eine alte Datei falsch zu interpretieren.
 
 ## Lizenz
 
-Der Code in `main/` ist ein eigenständiger Port. Datenpunktdefinitionen,
-Enumerationen und Codec-Semantik stammen aus open3e (Apache-2.0) — siehe
-[`NOTICE`](NOTICE).
+**Apache License 2.0** — siehe [`LICENSE`](LICENSE).
+
+Dieselbe Lizenz wie die beiden Quellen, aus denen dieses Projekt schöpft:
+[open3e](https://github.com/open3e/open3e) und
+[E3onCAN](https://github.com/MyHomeMyData/E3onCAN) stehen beide unter
+Apache-2.0. Der Code in `main/` ist ein eigenständiger Port;
+Datenpunktdefinitionen, Enumerationen und Codec-Semantik stammen von dort.
+Wer das Projekt weitergibt — auch als fertige Firmware —, gibt
+[`NOTICE`](NOTICE) mit: die Datei beschreibt, was woher kommt, und Apache-2.0
+verlangt das ausdrücklich.

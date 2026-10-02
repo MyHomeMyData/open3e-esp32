@@ -112,9 +112,11 @@ und ist seine Arbeit, nicht meine.
 
 ## Lizenz und Herkunft
 
-Der Code in `main/` ist ein eigenständiger Port. Die Datenpunktdefinitionen,
-Enumerationen und die Codec-Semantik stammen aus open3e und stehen unter der
-**Apache License 2.0** (Copyright 2023 abnoname, philippoo66 und Mitwirkende);
-Einzelheiten in der `NOTICE` des Projekts. Die open3e-Quellen liegen nicht im
+Das Projekt steht unter der **Apache License 2.0** — derselben Lizenz wie
+open3e und E3onCAN, aus denen es schöpft. Der Code in `main/` ist ein
+eigenständiger Port; die Datenpunktdefinitionen, Enumerationen und die
+Codec-Semantik stammen aus open3e (Copyright 2023 abnoname, philippoo66 und
+Mitwirkende), die E380-Dekodierung aus E3onCAN (Copyright 2023 MyHomeMyData).
+Was woher kommt, steht in der `NOTICE` des Projekts. Die open3e-Quellen liegen nicht im
 Repository — `tools/fetch_open3e.py` holt sie beim Bauen auf einen festen
 Commit und `tools/gen_dpdb.py` wandelt sie in die Datenbank auf dem Gerät.
