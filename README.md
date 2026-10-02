@@ -513,8 +513,8 @@ make test
 | Test | Prüft | Umfang |
 |---|---|---|
 | `test_codec` | Dekodieren == open3e | 4692 Vektoren über alle 1564 DIDs |
-| `test_encode` | Kodieren == open3e, **und** dieselben Ablehnungen | 4013 + 315 |
-| `test_flatten` | geflachtes MQTT == open3es `mqttdump()` | 23 100 Topic/Wert-Paare |
+| `test_encode` | Kodieren == open3e, **und** dieselben Ablehnungen | 3990 + 332 |
+| `test_flatten` | geflachtes MQTT == open3es `mqttdump()` | 23 395 Topic/Wert-Paare |
 | `test_isotp` | Segmentierung, Flow Control, SN-Wrap, Frame-Verlust | bis 4095 Byte |
 | `test_uds` | Antwort, Schweigen, negative Antwort, responsePending | 5 Szenarien |
 | `test_em380` | E380-Dekodierung == E3onCAN | 560 Vektoren über 14 CAN-IDs |
