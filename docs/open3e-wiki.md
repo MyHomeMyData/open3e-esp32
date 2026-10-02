@@ -63,29 +63,153 @@ weil WebKit die Schnittstelle nicht umsetzt:
 
 <https://esp32can.thomas-peterson.de>
 
-Danach:
+Danach spannt das Gerät einen WLAN-Hotspot auf, das Captive Portal öffnet die
+Einrichtungsseite von selbst. WLAN eintragen → Neustart → erreichbar unter
+`http://open3e.local`. Ab hier passiert alles im Browser.
 
-1. Das Gerät spannt einen WLAN-Hotspot auf, das Captive Portal öffnet die
-   Einrichtungsseite von selbst.
-2. WLAN eintragen → Neustart → erreichbar unter `http://open3e.local`.
-3. Im Web-UI einen Bus-Scan starten; gefundene Geräte und Datenpunkte
-   erscheinen mit Namen aus der open3e-Datenbank.
-4. Pro Datenpunkt festlegen, ob und auf welches Topic er geht, mit welchem
-   Intervall, als JSON oder flach.
+## Der Bus-Scan
+
+Das Gegenstück zu `Open3E_depictSystem` auf dem Pi, nur dass das Ergebnis auf
+dem Gerät bleibt und die Oberfläche damit weiterarbeitet.
+
+| Modus | Umfang | Dauer |
+|---|---|---|
+| Schnellscan | nur die Datenpunkte der mitgelieferten Datenbank | ca. 1 Min. je ECU |
+| Vollscan | DID 256 bis 4000 | 10–20 Min. je ECU |
+
+Gesucht wird auf den COB-IDs `0x680`–`0x6EF` über **DID 256**
+(`BusIdentification`); dazu kommt **DID 377** für die Viessmann-Identnummer.
+Daraus füllt sich eine Gerätetabelle mit Typ (`HPMUMASTER`, `EMCUSLAVE`, …),
+Funktion, Bustyp, Software- und Hardwarestand und Seriennummer.
+
+Zwei Dinge, die den Unterschied machen:
+
+**DID 256 wird über den echten Codec dekodiert**, nicht über feste
+Byte-Offsets. Der Datensatz hat eine Längenvariante — handgerechnete Offsets
+produzieren auf einem Gerät, das die andere zurückgibt, stillschweigend
+Unsinn.
+
+**Das Zwischenergebnis wird nach jeder ECU gespeichert.** Ein Neustart mitten
+im Vollscan wirft nicht alles weg.
+
+Jede ECU bekommt einen frei wählbaren **Namen**, der den Platzhalter
+`{device}` in den Topics füllt — genau wie der Schlüssel in open3es
+`devices.json`. Voreingestellt ist deshalb `0x680` und nicht der Gerätetyp:
+ein Formatstring mit `{device}` erzeugt so dieselben Topics wie vorher auf dem
+Pi. Vergebene Namen überleben einen erneuten Scan.
+
+### „nicht in DB"
+
+Ein Datenpunkt landet nur in der Liste, wenn die ECU mit einer **positiven
+UDS-Antwort** geantwortet hat. Die Markierung heißt also nicht „kam nichts
+zurück", sondern „open3e liefert für diesen DID keine Beschreibung mit"; die
+Antwortlänge steht als Beleg daneben.
+
+Lesen und nach MQTT senden lassen sich solche Datenpunkte trotzdem — der Wert
+ist dann ein Hex-String wie in open3es Raw-Modus. **Schreiben ist für sie
+gesperrt.** Wer so einen DID identifiziert, kann ihn bei open3e beitragen.
+
+## Datenpunkte auswählen
+
+Pro Datenpunkt wird eingestellt, ob er überhaupt gesendet wird, in welchem
+Intervall, und wie:
+
+| Modus | Ergebnis |
+|---|---|
+| **JSON** | ein Topic, Nutzlast das ganze Objekt |
+| **geflacht** | ein Topic je Unterfeld, Nutzlast der nackte Wert |
+
+```
+open3e/FlowTemperatureSensor
+  → {"Actual": 27.2, "Minimum": 21.0, "Maximum": 31.4, …}
+
+open3e/FlowTemperatureSensor/Actual   → 27.2
+open3e/FlowTemperatureSensor/Minimum  → 21.0
+```
+
+Das Topic-Suffix lässt sich je Datenpunkt überschreiben, und einzeln
+abschalten, ob er in die Home-Assistant-Discovery geht. `open3e/LWT` trägt
+retained `online` / `offline`.
+
+Für Aufzählungen lassen sich eigene Beschriftungen hinterlegen — aus
+„BypassStatus 2" wird dann „automatisch", und in Home Assistant entsteht statt
+eines Zahlenfelds eine Auswahlliste.
+
+## Was man sieht
+
+Eine Statusseite mit WLAN, Laufzeit, Speicher und MQTT-Zählern — und einer
+CAN-Diagnose, die mehr zeigt als „läuft": Bus-Fehler, Sende- und
+Empfangsfehlerzähler, Wiederanläufe. Die beiden Fehlerzähler steigen lange
+bevor der Controller wirklich bus-off geht und sind damit das früheste
+sichtbare Zeichen für ein Verkabelungs- oder Bitraten-Problem.
+
+Dazu ein **CAN-Mitschnitt im Browser**, der unbeaufsichtigt auf ein Ereignis
+warten kann. Drei Auslöser:
+
+- ein **UDS-Schreibzugriff** irgendwo auf dem Bus,
+- etwas **Neues**: der Mitschnitt lernt eine Zeit lang, welche Identifier
+  vorkommen und welche Bytes sich überhaupt je ändern, und löst dann bei einem
+  unbekannten Identifier aus — oder bei einem Byte, das durchgehend konstant
+  war und es plötzlich nicht mehr ist,
+- eine **Änderung an den Steuer-Datenpunkten**, mit denen das Backend den
+  Speicher fährt. Die liegen in ISO-TP-Nachrichten mit Service 0x77, also
+  mehrere Frames tief; ein Byte-Vergleich auf einem einzelnen Frame sagt dort
+  nichts.
+
+Damit lässt sich herausfinden, was ein Hersteller-Gateway tut, während niemand
+davorsitzt — und genau so ist das netzdienstliche Laden unten gefunden
+worden.
+
+## Schreiben auf den Bus
+
+Zwei Sperren, beide müssen offen sein: ein globaler Schalter in den
+Einstellungen (ab Werk zu), und die open3e-Datenbank muss den Datenpunkt als
+`rw` führen. Datenpunkte ohne Beschreibung lassen sich grundsätzlich nicht
+schreiben.
+
+Vor jedem Schreibvorgang wird der Datenpunkt gelesen — das wählt die
+Codec-Variante und bestätigt, dass es ihn auf dieser ECU überhaupt gibt. Felder,
+die der Aufrufer nicht angibt, werden aus dem aktuellen Wert ergänzt; ein
+Bedienelement kann also eine Lüfterstufe setzen, ohne die übrigen Felder des
+Datensatzes zu kennen.
 
 ## Was darüber hinaus geht
 
-MQTT-Auto-Discovery für Home Assistant (mit Einheiten und Geräteklassen aus
-dem Codec), passiver Empfang des E380-Energiezählers, Dekodierung des
-Broadcast-Kanals (Service 0x77, auf dem bei einem Vitocharge der Verkehr
-zwischen Backend-Gateway und Speicher läuft), ein CAN-Mitschnitt im Browser
-mit Auslöser auf Schreibzugriffe, zwei Kontakteingänge auf den freien GPIO des
-SH1.0-Steckers (Klingel, Türkontakt), KNXnet/IP, ein Erzeuger für
-evcc-Konfiguration — und das netzdienstliche Laden einer Vitocharge VX3 über
-DID 2188.
+**Home Assistant.** MQTT-Auto-Discovery mit Einheiten und Geräteklassen aus
+dem Codec; schreibbare Datenpunkte werden zu Bedienelementen statt zu
+Anzeigen.
 
-Einzelheiten stehen in der README des Projekts; hier würden sie den Rahmen
-sprengen.
+**E380-Energiezähler**, passiv mitgelesen — der Zähler beantwortet keine
+Anfrage, er sendet acht Byte auf `0x250`–`0x25D`, und das ist das ganze
+Protokoll.
+
+**Broadcast-Kanal (Service 0x77).** Auf einem Vitocharge-Bus läuft darüber der
+gesamte Verkehr zwischen Backend-Gateway und Speicher. Die Firmware setzt die
+ISO-TP-Fragmente zusammen und dekodiert sie mit demselben Codec wie alles
+andere.
+
+**Kontakteingänge.** Die beiden freien GPIO des SH1.0-Steckers lesen einen
+Schalter — Klingel, Türkontakt, Störmeldung — und melden ihn als binären Sensor
+nach Home Assistant. Die Entprellung ist unsymmetrisch ausgelegt, damit auch
+ein über einen Optokoppler abgegriffenes Wechselspannungssignal als *ein*
+Ereignis ankommt und nicht als hundert.
+
+**KNXnet/IP.** Derselbe Kontakt kann zusätzlich ein 1-Bit-Telegramm auf eine
+Gruppenadresse schreiben, wahlweise per Tunnelling oder Routing.
+
+**evcc.** Das Gerät erzeugt den fertigen Konfigurationsblock für evcc aus der
+tatsächlichen Datenpunktauswahl — Netz, PV, Speicher, Ladestand und die
+Batteriesteuerung über `batterymode`.
+
+**Netzdienstliches Laden einer Vitocharge VX3.** Über DID 2188 lässt sich der
+Sollwert am Netzverknüpfungspunkt vorgeben. Der Energiemanager der Anlage
+schreibt denselben Datenpunkt alle zehn Sekunden neu; die Firmware übertönt ihn
+und wird dabei vom Broadcast-Kanal geweckt, statt auf einen Timer zu warten.
+Nichts wird dauerhaft umkonfiguriert: jede Frist, jeder Neustart und jedes
+gezogene Kabel beenden den Eingriff, und die Anlage regelt binnen Sekunden
+wieder selbst.
+
+Einzelheiten zu all dem stehen in der README des Projekts.
 
 ## Rohdaten für eigene Decoder
 
