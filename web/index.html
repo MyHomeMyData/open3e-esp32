@@ -466,6 +466,15 @@
 </section>
 
 <section id="tab-settings">
+  <nav class="subnav" id="set-nav">
+    <button data-sub="link" class="active">Anbindung</button>
+    <button data-sub="evcc">evcc</button>
+    <button data-sub="bus">Bus</button>
+    <button data-sub="device">Gerät</button>
+    <button data-sub="maint">Wartung</button>
+  </nav>
+
+  <div class="subpanel active" id="sub-link">
   <div class="card">
     <h2>MQTT</h2>
     <label class="small"><input type="checkbox" id="mq-enabled"> MQTT aktivieren</label>
@@ -496,8 +505,70 @@
     <p class="hint" style="margin:0">Beim Abschalten werden die bereits gesendeten
       Discovery-Topics gelöscht, damit keine verwaisten Entitäten zurückbleiben.</p>
   </div>
+
+  <div class="card" id="card-knx">
+    <h2>KNX</h2>
+    <p class="hint">Schickt beim Schalten eines Kontakteingangs ein 1-Bit-Telegramm
+      (DPT 1.001) auf eine Gruppenadresse — geschlossen sendet 1, offen sendet 0.
+      Die Adresse trägst du unter <i>Gerät → Kontakteingänge</i> ein. Unabhängig von MQTT
+      und Home Assistant: die Klingel funktioniert auch, wenn der Broker steht.</p>
+    <label class="small"><input type="checkbox" id="knx-on"> KNX aktivieren</label>
+    <div class="row">
+      <label style="flex:0 0 220px"><span>Betriebsart</span>
+        <select id="knx-mode">
+          <option value="tunnelling">Tunnelling (IP-Interface)</option>
+          <option value="routing">Routing (Multicast)</option>
+        </select>
+      </label>
+      <label><span>Gateway</span><input type="text" id="knx-gw" placeholder="192.168.1.10"></label>
+      <label style="flex:0 0 110px"><span>Port</span>
+        <input type="number" id="knx-port" value="3671"></label>
+    </div>
+    <div class="row">
+      <label style="flex:0 0 220px"><span>Eigene Adresse (nur Routing)</span>
+        <input type="text" id="knx-src" placeholder="1.1.250"></label>
+      <label><span>Zustand</span><div class="v mono" id="knx-state">–</div></label>
+    </div>
+    <p class="small muted" style="margin:-4px 0 12px"><b>Tunnelling</b> kann jedes
+      IP-Interface, hält aber eine Verbindung offen und belegt einen der wenigen
+      Tunnel-Kanäle des Gateways. <b>Routing</b> ist zustandslos und für ein
+      seltenes Ereignis wie eine Klingel besser geeignet, setzt aber einen
+      IP-Router voraus, der Telegramme wirklich weiterleitet — ein Interface tut
+      das meist nicht, auch wenn es den Dienst meldet. Bei Routing braucht das
+      Gerät eine eigene physikalische Adresse, die sonst niemand benutzt.</p>
+  </div>
+
+  </div>
+
+  <div class="subpanel" id="sub-evcc">
   <div class="card">
-    <h2>System</h2>
+    <h2>evcc</h2>
+    <p class="hint">evcc kann die Werte dieses Gateways über sein MQTT-Plugin lesen
+      <b>und den Speicher steuern</b> — dafür braucht es kein EEBUS. Der Block unten
+      ist aus der tatsächlichen Datenpunkt-Auswahl dieses Geräts erzeugt, nicht aus
+      einer Vorlage: Topics, Feldnamen und Zeitfenster stimmen also mit dem überein,
+      was die Firmware wirklich veröffentlicht.</p>
+    <div class="grid" id="evcc-status"></div>
+    <p class="hint" id="evcc-missing" hidden></p>
+    <p class="hint" id="evcc-control" hidden>Für die <b>Steuerung</b> braucht evcc
+      Leistung <i>und</i> Ladestand des Speichers. Fehlt einer von beiden, wird nur
+      gelesen.</p>
+    <div class="warnbox">
+      Die Steuerung setzt <b>Schreiben freigeben</b> voraus, und der Speicher-ECU muss
+      unter <i>Aus dem Netz laden</i> eingetragen sein — sonst weiß das Gateway nicht,
+      an welches Gerät der Befehl geht.
+    </div>
+    <pre class="mono" id="evcc-yaml" style="max-height:420px;overflow:auto;white-space:pre;
+      background:var(--bg2,#00000010);padding:12px;border-radius:6px;font-size:12px">–</pre>
+    <div class="row">
+      <button class="btn" id="evcc-copy" style="flex:0 0 auto">In die Ablage kopieren</button>
+    </div>
+  </div>
+  </div>
+
+  <div class="subpanel" id="sub-bus">
+  <div class="card">
+    <h2>Schreibzugriff</h2>
     <div class="warnbox">
       <b>Schreiben auf den CAN-Bus</b> ist standardmäßig deaktiviert. Schreibbar sind
       ohnehin nur Datenpunkte, die die open3e-Datenbank als <span class="mono">rw</span>
@@ -519,18 +590,16 @@
       unabhängig von Datenpunkt-Auswahl und Auto-Discovery — für Software, die
       selbst dekodiert. Höchstens 32 IDs.<br>Zustand:
       <span class="mono" id="sys-rawstate">–</span></p>
+  </div>
+  <div class="card">
+    <h2>Passiver Empfang</h2>
     <label class="small"><input type="checkbox" id="sys-em380"> E380-Energiezähler mitlesen (passiv)</label>
     <p class="small muted" style="margin:-4px 0 12px">Standardmäßig aus. Ohne
       angeschlossenen Zähler bringt es nichts und läuft nur im Empfangs-Interrupt mit.</p>
-    <label><span>Zeitzone (POSIX)</span><input type="text" id="sys-tz"></label>
-    <p class="small muted" style="margin:-4px 0 12px">Wird für die Zeit- und
-      Datums-Codecs gebraucht, die open3e in lokaler Zeit ausgibt.</p>
-    <div class="row" style="margin-top:8px">
-      <button class="btn" id="set-save" style="flex:0 0 auto">Einstellungen speichern</button>
-      <button class="btn sec" id="dev-restart" style="flex:0 0 auto">Neu starten</button>
-    </div>
+  </div>
   </div>
 
+  <div class="subpanel" id="sub-device">
   <div class="card" id="card-contacts">
     <h2>Kontakteingänge</h2>
     <p class="hint">Der SH1.0-Stecker führt GND, 3V3, GPIO1 und GPIO2 heraus. Beide
@@ -615,70 +684,17 @@
       einen Taster und überbrücken zugleich die Lücken eines über einen
       Optokoppler abgegriffenen Wechselspannungssignals. Höher stellen, wenn ein
       Klingeln als mehrere gezählt wird.</p>
-    <div class="row">
-      <button class="btn" id="ct-save" style="flex:0 0 auto">Eingänge speichern</button>
-    </div>
   </div>
 
   <div class="card">
-    <h2>evcc</h2>
-    <p class="hint">evcc kann die Werte dieses Gateways über sein MQTT-Plugin lesen
-      <b>und den Speicher steuern</b> — dafür braucht es kein EEBUS. Der Block unten
-      ist aus der tatsächlichen Datenpunkt-Auswahl dieses Geräts erzeugt, nicht aus
-      einer Vorlage: Topics, Feldnamen und Zeitfenster stimmen also mit dem überein,
-      was die Firmware wirklich veröffentlicht.</p>
-    <div class="grid" id="evcc-status"></div>
-    <p class="hint" id="evcc-missing" hidden></p>
-    <p class="hint" id="evcc-control" hidden>Für die <b>Steuerung</b> braucht evcc
-      Leistung <i>und</i> Ladestand des Speichers. Fehlt einer von beiden, wird nur
-      gelesen.</p>
-    <div class="warnbox">
-      Die Steuerung setzt <b>Schreiben freigeben</b> voraus, und der Speicher-ECU muss
-      unter <i>Aus dem Netz laden</i> eingetragen sein — sonst weiß das Gateway nicht,
-      an welches Gerät der Befehl geht.
-    </div>
-    <pre class="mono" id="evcc-yaml" style="max-height:420px;overflow:auto;white-space:pre;
-      background:var(--bg2,#00000010);padding:12px;border-radius:6px;font-size:12px">–</pre>
-    <div class="row">
-      <button class="btn" id="evcc-copy" style="flex:0 0 auto">In die Ablage kopieren</button>
-    </div>
+    <h2>Zeit</h2>
+    <label><span>Zeitzone (POSIX)</span><input type="text" id="sys-tz"></label>
+    <p class="small muted" style="margin:-4px 0 12px">Wird für die Zeit- und
+      Datums-Codecs gebraucht, die open3e in lokaler Zeit ausgibt.</p>
+  </div>
   </div>
 
-  <div class="card" id="card-knx">
-    <h2>KNX</h2>
-    <p class="hint">Schickt beim Schalten eines Kontakteingangs ein 1-Bit-Telegramm
-      (DPT 1.001) auf eine Gruppenadresse — geschlossen sendet 1, offen sendet 0.
-      Die Adresse trägst du oben beim jeweiligen Eingang ein. Unabhängig von MQTT
-      und Home Assistant: die Klingel funktioniert auch, wenn der Broker steht.</p>
-    <label class="small"><input type="checkbox" id="knx-on"> KNX aktivieren</label>
-    <div class="row">
-      <label style="flex:0 0 220px"><span>Betriebsart</span>
-        <select id="knx-mode">
-          <option value="tunnelling">Tunnelling (IP-Interface)</option>
-          <option value="routing">Routing (Multicast)</option>
-        </select>
-      </label>
-      <label><span>Gateway</span><input type="text" id="knx-gw" placeholder="192.168.1.10"></label>
-      <label style="flex:0 0 110px"><span>Port</span>
-        <input type="number" id="knx-port" value="3671"></label>
-    </div>
-    <div class="row">
-      <label style="flex:0 0 220px"><span>Eigene Adresse (nur Routing)</span>
-        <input type="text" id="knx-src" placeholder="1.1.250"></label>
-      <label><span>Zustand</span><div class="v mono" id="knx-state">–</div></label>
-    </div>
-    <p class="small muted" style="margin:-4px 0 12px"><b>Tunnelling</b> kann jedes
-      IP-Interface, hält aber eine Verbindung offen und belegt einen der wenigen
-      Tunnel-Kanäle des Gateways. <b>Routing</b> ist zustandslos und für ein
-      seltenes Ereignis wie eine Klingel besser geeignet, setzt aber einen
-      IP-Router voraus, der Telegramme wirklich weiterleitet — ein Interface tut
-      das meist nicht, auch wenn es den Dienst meldet. Bei Routing braucht das
-      Gerät eine eigene physikalische Adresse, die sonst niemand benutzt.</p>
-    <div class="row">
-      <button class="btn" id="knx-save" style="flex:0 0 auto">KNX speichern</button>
-    </div>
-  </div>
-
+  <div class="subpanel" id="sub-maint">
   <div class="card">
     <h2>Sichern und wiederherstellen</h2>
     <p class="hint">Die Sicherung enthält WLAN, MQTT, Systemeinstellungen, die
@@ -715,6 +731,19 @@
       <button class="btn danger" data-reset="all" style="flex:0 0 auto">Alles außer WLAN</button>
       <button class="btn danger" id="dev-forget" style="flex:0 0 auto">WLAN vergessen</button>
     </div>
+  </div>
+  </div>
+
+  <!-- Außerhalb der Bereiche, weil dieser Knopf bereichsübergreifend
+       speichert. Vorher stand er dreimal da: "Eingänge speichern" und "KNX
+       speichern" riefen dieselbe Funktion und schrieben jedes Mal sämtliche
+       Einstellungen -- die Beschriftungen versprachen einen Zuschnitt, den es
+       nie gab. evcc und Wartung haben nichts zu speichern; evcc erzeugt nur
+       Text, Wartung besteht aus Aktionen mit eigenen Knöpfen. -->
+  <div class="savebar">
+    <button class="btn" id="set-save">Einstellungen speichern</button>
+    <button class="btn sec" id="dev-restart">Neu starten</button>
+    <span class="small muted">Speichert Anbindung, Bus und Gerät gemeinsam.</span>
   </div>
 </section>
 

@@ -1537,14 +1537,43 @@ async function saveSettings() {
 function initApp() {
   $("app").hidden = false;
 
-  for (const b of document.querySelectorAll("nav button")) {
+  /* Ausdrücklich "header nav": der Selektor "nav button" fängt sonst auch die
+     Unter-Navigation der Einstellungen mit, und die hat kein data-tab -- der
+     erste Klick dort liefe auf tab-undefined. */
+  for (const b of document.querySelectorAll("header nav button")) {
     b.onclick = () => {
-      document.querySelectorAll("nav button").forEach((x) => x.classList.remove("active"));
-      document.querySelectorAll("section").forEach((x) => x.classList.remove("active"));
+      document.querySelectorAll("header nav button").forEach((x) => x.classList.remove("active"));
+      document.querySelectorAll("main > section").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
       $(`tab-${b.dataset.tab}`).classList.add("active");
     };
   }
+
+  /* Unterteilung der Einstellungen. Der zuletzt geöffnete Bereich wird
+     gemerkt: wer an MQTT arbeitet, landet nach jedem Neuladen sonst wieder
+     bei Anbindung und sucht sich zurück. */
+  const subButtons = document.querySelectorAll(".subnav button");
+  const showSub = (name) => {
+    let hit = false;
+    for (const b of subButtons) {
+      const on = b.dataset.sub === name;
+      b.classList.toggle("active", on);
+      const panel = $(`sub-${b.dataset.sub}`);
+      if (panel) panel.classList.toggle("active", on);
+      hit = hit || on;
+    }
+    return hit;
+  };
+  for (const b of subButtons) {
+    b.onclick = () => {
+      showSub(b.dataset.sub);
+      try { localStorage.setItem("settingsSub", b.dataset.sub); } catch (e) { /* egal */ }
+    };
+  }
+  try {
+    const last = localStorage.getItem("settingsSub");
+    if (last) showSub(last);
+  } catch (e) { /* privater Modus: dann eben immer Anbindung */ }
 
   $("diag-run").onclick = async () => {
     const out = $("diag-out"), btn = $("diag-run");
@@ -1657,8 +1686,6 @@ function initApp() {
   $("em-only-seen").onchange = () => loadMeter().catch(() => {});
 
   $("set-save").onclick = saveSettings;
-  $("ct-save").onclick = saveSettings;
-  $("knx-save").onclick = saveSettings;
   $("evcc-copy").onclick = async () => {
     try {
       await navigator.clipboard.writeText($("evcc-yaml").textContent);

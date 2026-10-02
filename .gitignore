@@ -21,3 +21,6 @@ managed_components/
 
 # Deploy-Ziel: eine Maschine in einem privaten Netz, gehört nicht ins Repo.
 .deploy.mk
+
+# Playwright-MCP legt hier Screenshots und Snapshots ab.
+.playwright-mcp/
