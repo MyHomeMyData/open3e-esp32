@@ -79,7 +79,7 @@ make fwinfo
 
 ```
   project        open3e-gateway
-  version        20260901-2218
+  version        0.2.0+ec2f7f9
   built          Sep  2 2026 00:19:24
   ESP-IDF        v6.1
   build identity 068bd904f9f67bcf
@@ -87,9 +87,17 @@ make fwinfo
 
 Stimmt die Kennung mit der auf der Statusseite überein, läuft genau dieser
 Build. Das ist verlässlicher als die Versionsangabe: die ist nur so gut wie die
-Disziplin, sie hochzuzählen — ESP-IDF setzt ohne Git-Tags stumm eine `1` ein,
-was nach einem OTA aussieht wie „nichts passiert". Der Buildprozess setzt sie
-deshalb aus `git describe`, ersatzweise aus dem Datum.
+Disziplin, sie hochzuzählen.
+
+Die Version selbst steht in `version.txt` (semantisch, z. B. `0.2.0`) und wird
+mit jedem Release zusammen mit `CHANGELOG.md` erhöht. Der Build hängt den
+Commit als Metadatum an — `0.2.0+ec2f7f9`, bei einem veränderten
+Arbeitsverzeichnis `0.2.0+ec2f7f9-dirty` —, damit zwei Builds derselben
+Version unterscheidbar bleiben. `/api/status` liefert beides getrennt:
+`version` für Programme, die eine Mindestversion prüfen, `firmware` für
+Menschen. Die Raw-API für externe Integrationen hat eine eigene Nummer
+(`rawApiVersion`), die nur bei Änderungen an dieser Schnittstelle steigt;
+die Statusseite zeigt beide in der Karte „Gerät".
 
 ### Auslastung
 

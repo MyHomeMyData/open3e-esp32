@@ -229,6 +229,10 @@ function renderStatus(s) {
   $("s-pollerr").textContent = s.poll.failures;
 
   $("s-fw").textContent = s.firmware;
+  /* The raw API has its own version, because external integrations check it
+     rather than the firmware release -- the status page is where someone
+     looks when an adapter reports a mismatch. */
+  $("s-rawapi").textContent = s.rawApiVersion != null ? `Version ${s.rawApiVersion}` : "–";
   $("s-built").textContent = s.buildDate || "–";
   $("s-sha").textContent = s.elfSha || "–";
   $("s-db").textContent = s.dbLoaded ? `${s.dbVersion} (${s.dbCount})` : "nicht geladen";

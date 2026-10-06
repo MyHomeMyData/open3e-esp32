@@ -35,6 +35,16 @@ jobs:
         # so git refuses to read the repository without this.
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Tag matches version.txt
+        # A release is the pair of tag and version.txt. If they disagree, the
+        # flash page would offer "v0.3.0" while the board reports 0.2.0 -- the
+        # kind of mismatch nobody notices until an adapter refuses to connect.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          ver="$(tr -d '[:space:]' < version.txt)"
+          test "$tag" = "$ver" || { echo "tag v$tag but version.txt says $ver"; exit 1; }
+
       - name: Host build dependencies
         # The host suite links against the system cJSON, which the ESP-IDF
         # image has no reason to carry.

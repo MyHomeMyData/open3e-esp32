@@ -215,7 +215,9 @@ static esp_err_t h_status(httpd_req_t *r)
 
     o3e_buf_t b;
     o3e_buf_init(&b);
-    char t[512];
+    /* The first chunk below carries two version strings of up to 31 bytes
+     * each plus the database version; 512 was within reach of truncation. */
+    char t[640];
 
     ota_info_t ota;
     ota_info(&ota);
@@ -240,8 +242,19 @@ static esp_err_t h_status(httpd_req_t *r)
     for (int i = 0; i < 8; i++) {
         snprintf(elf_sha + i * 2, 3, "%02x", app->app_elf_sha256[i]);
     }
+    /* "firmware" is the whole build string, "0.2.0+ec2f7f9". "version" is the
+     * release number alone, so a client comparing against a minimum version
+     * does not have to know about the build-metadata suffix (see
+     * CMakeLists.txt for how the string is composed). */
+    char version[sizeof(app->version)];
+    snprintf(version, sizeof(version), "%s", app->version);
+    char *plus = strchr(version, '+');
+    if (plus) {
+        *plus = '\0';
+    }
     snprintf(t, sizeof(t),
-             "{\"firmware\": \"%s\", \"buildDate\": \"%s %s\", \"elfSha\": \"%s\", "
+             "{\"firmware\": \"%s\", \"version\": \"%s\", "
+             "\"buildDate\": \"%s %s\", \"elfSha\": \"%s\", "
              "\"idfVersion\": \"%s\", "
              "\"dbVersion\": \"%s\", \"dbLoaded\": %s, \"dbCount\": %u, "
              "\"uptimeS\": %llu, "
@@ -249,7 +262,7 @@ static esp_err_t h_status(httpd_req_t *r)
              "\"rawWriteEnabled\": %s, \"rawApiVersion\": %u, "
              "\"partition\": \"%s\", \"pendingVerify\": %s, "
              "\"clock\": \"%s\", \"clockValid\": %s, ",
-             app->version, app->date, app->time, elf_sha, app->idf_ver,
+             app->version, version, app->date, app->time, elf_sha, app->idf_ver,
              o3e_db_version(), o3e_db_is_open() ? "true" : "false",
              (unsigned)o3e_db_count(),
              (unsigned long long)(esp_timer_get_time() / 1000000),

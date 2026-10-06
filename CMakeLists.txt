@@ -3,21 +3,39 @@ cmake_minimum_required(VERSION 3.16)
 # The datapoint database and the web UI are generated, not vendored: see
 # tools/build_fs.py and the README. Build them before flashing with
 #   idf.py storage
-# Version string shown in the interface. ESP-IDF derives one from `git
-# describe` when the project is a tagged repository; without tags that yields
-# the useless default "1", so fall back to the build date. What actually
+
+# Version string shown in the interface and reported by /api/status.
+#
+# version.txt holds the release number (semver, the one a tag and the CHANGELOG
+# refer to). The commit is appended as build metadata, "0.2.0+ec2f7f9", so two
+# builds of the same release stay distinguishable and a dirty tree is marked as
+# such. Without git the build time stands in for the commit. What actually
 # identifies a build is the ELF checksum next to it -- see `make fwinfo`.
+#
+# ESP-IDF would read version.txt on its own, but only verbatim -- the commit
+# suffix is why PROJECT_VER is composed here. The field in the app descriptor
+# is 32 bytes including the terminator, hence the length check.
+file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" APP_VERSION LIMIT_COUNT 1)
+string(STRIP "${APP_VERSION}" APP_VERSION)
+if(NOT APP_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")
+    message(FATAL_ERROR "version.txt must hold a semantic version, got '${APP_VERSION}'")
+endif()
 execute_process(
-    COMMAND git describe --tags --always --dirty
+    COMMAND git describe --always --dirty --exclude "*"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE GIT_DESCRIBE
+    OUTPUT_VARIABLE GIT_COMMIT
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
 )
-if(GIT_DESCRIBE)
-    set(PROJECT_VER "${GIT_DESCRIBE}")
+if(GIT_COMMIT)
+    set(PROJECT_VER "${APP_VERSION}+${GIT_COMMIT}")
 else()
-    string(TIMESTAMP PROJECT_VER "%Y%m%d-%H%M" UTC)
+    string(TIMESTAMP BUILD_STAMP "%Y%m%d-%H%M" UTC)
+    set(PROJECT_VER "${APP_VERSION}+${BUILD_STAMP}")
+endif()
+string(LENGTH "${PROJECT_VER}" PROJECT_VER_LEN)
+if(PROJECT_VER_LEN GREATER 31)
+    message(FATAL_ERROR "version string '${PROJECT_VER}' exceeds the 31 bytes of the app descriptor")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

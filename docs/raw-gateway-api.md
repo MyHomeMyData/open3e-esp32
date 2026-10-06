@@ -1,5 +1,18 @@
 # Raw-Gateway-API (open3e-esp32 ↔ ioBroker.e3oncan)
 
+| | |
+|---|---|
+| **Raw-API-Version** | `1` (Feld `rawApiVersion` in `/api/status`) |
+| **Mindestfirmware** | `0.2.0` (Feld `version` in `/api/status`, siehe `CHANGELOG.md`) |
+
+Die Raw-API-Version zählt hoch, wenn sich Anfrage oder Antwort von
+`rawread`/`rawwrite` ändern — unabhängig von der Firmware-Version, die mit
+jedem Release steigt. Ein Client prüft also zwei Dinge: ist `rawApiVersion`
+überhaupt vorhanden (sonst ist die Firmware zu alt für diese Schnittstelle),
+und ist der Wert der, gegen den er entwickelt wurde. Die Mindestfirmware oben
+ist die erste Version, die den hier beschriebenen Stand vollständig liefert;
+die Statusseite zeigt beide Nummern in der Karte „Gerät".
+
 Referenz für die Rohdaten-Schnittstellen, die dieser Branch für externe
 Integrationen ergänzt (REST `rawread`/`rawwrite`, MQTT-Raw-Relay, Status-
 Erkennung, Scan-Delegation) sowie für die Gegenseite in ioBroker.e3oncan,
@@ -200,6 +213,17 @@ nötig, nur die beiden vorhandenen Felder nutzen.
 Neu ergänzt (in `/api/status`, `/api/settings`, `/api/export`/`/api/import`,
 neben `writeEnabled`): `rawApiVersion` (aktuell `1`, für Firmware-Versions-
 erkennung) und `rawWriteEnabled` (siehe Abschnitt 1, Gate für `rawwrite`).
+
+Zur Firmware selbst liefert `/api/status` drei Felder:
+```json
+{ "firmware": "0.2.0+ec2f7f9", "version": "0.2.0", "elfSha": "068bd904f9f67bcf", ... }
+```
+`version` ist die Release-Nummer aus `version.txt` (semantisch versioniert),
+`firmware` dieselbe Nummer mit dem Commit als Build-Metadatum (`-dirty`,
+wenn aus einem veränderten Arbeitsverzeichnis gebaut), `elfSha` die
+Prüfsumme des Builds. Für eine Mindestversions-Prüfung ist `version` das
+richtige Feld; `firmware` ist für Menschen und Fehlermeldungen gedacht.
+Ältere Firmware ohne `version` meldet in `firmware` nur den Commit-Hash.
 
 ### Push (MQTT)
 
