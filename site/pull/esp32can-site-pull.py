@@ -21,6 +21,7 @@ import shutil
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -48,6 +49,26 @@ def token() -> str:
     return tok
 
 
+class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
+    """Drop the GitHub token when the download bounces to blob storage.
+
+    The artifact endpoint answers 302 to a pre-signed Azure URL. urllib
+    forwards every header to the new location, Azure sees a bearer token it
+    did not issue and answers 401 -- which looks exactly like a bad GitHub
+    token until one reads the www-authenticate header.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and (urllib.parse.urlsplit(newurl).netloc
+                                != urllib.parse.urlsplit(req.full_url).netloc):
+            new.remove_header("Authorization")
+        return new
+
+
+_opener = urllib.request.build_opener(_StripAuthOnRedirect)
+
+
 def api(path: str, tok: str, raw: bool = False) -> bytes | dict:
     req = urllib.request.Request(
         path if path.startswith("http") else API + path,
@@ -58,7 +79,7 @@ def api(path: str, tok: str, raw: bool = False) -> bytes | dict:
             "User-Agent": "esp32can-site-pull",
         },
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with _opener.open(req, timeout=120) as resp:
         data = resp.read()
     return data if raw else json.loads(data)
 
@@ -69,6 +90,9 @@ def latest_run(tok: str, channel: str) -> dict | None:
     if channel == "dev":
         q += "&branch=main"
     runs = api(q, tok)["workflow_runs"]
+    # Documented as newest first, but the first run on the server picked a
+    # four-day-old one over three newer successes. Sort rather than trust.
+    runs.sort(key=lambda r: r["run_number"], reverse=True)
     for run in runs:
         if channel == "dev":
             return run
