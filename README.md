@@ -33,7 +33,7 @@ Modul ESP32-S3-WROOM-1, 16 MB Flash, 8 MB PSRAM. Bus mit **250 kBit/s**.
 
 **Verkabelung.** CAN-H und CAN-L an den E3-Bus — und die Busmasse an **GND des
 Boards**. Wie das in einer Unterverteilung neben der Heizung aussieht, mit
-Fotos, Verdrahtungsplan und einem bezahlbaren Stecker für die gelbe Buchse 91:
+Fotos, Schaltbild und einem bezahlbaren Stecker für die gelbe Buchse 91:
 [`docs/aufbau-praxis.md`](docs/aufbau-praxis.md).
 
 Aus dem [Schaltplan](https://files.waveshare.com/wiki/ESP32-S3-RS485-CAN/ESP32-S3-RS485-CAN-Schematic.pdf):

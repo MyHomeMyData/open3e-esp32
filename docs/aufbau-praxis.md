@@ -5,7 +5,7 @@ Ein Erfahrungsbericht von **wunderbaum** aus der
 hier gesammelt, weil er das beschreibt, was in der README nur als Regel
 steht: wie man das Ding tatsächlich an die Heizung bekommt. Die Anlage ist
 eine Vitodens 343-F B3UG-19, eine Brennwerttherme für Fußbodenheizung mit
-Solarthermie fürs Brauchwasser. Fotos und Verdrahtungsplan stammen von ihm.
+Solarthermie fürs Brauchwasser. Die Fotos stammen von ihm.
 
 Was hier steht, ergänzt die beiden anderen Artikel und wiederholt sie nicht:
 die technische Einordnung in [open3e-wiki.md](open3e-wiki.md), die
@@ -52,9 +52,7 @@ ist alles mit einem Rest Patchkabel. Für die GND-Verbindung wurden zwei Adern
 genommen, für CAN-L und CAN-H eines der verdrillten Paare, hier orange und
 orange-weiß.
 
-![Verdrahtungsplan](img/aufbau/verdrahtungsplan.png)
-
-Der Plan noch einmal als Schaltbild:
+Als Schaltbild:
 
 ![Schaltbild: Versorgung, Leitungsschutzschalter, Netzteil, Adapter, Steckverbinder](img/aufbau/schaltbild.png)
 
