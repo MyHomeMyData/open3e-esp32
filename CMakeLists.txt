@@ -37,6 +37,14 @@ string(LENGTH "${PROJECT_VER}" PROJECT_VER_LEN)
 if(PROJECT_VER_LEN GREATER 31)
     message(FATAL_ERROR "version string '${PROJECT_VER}' exceeds the 31 bytes of the app descriptor")
 endif()
+# The string above is fixed when CMake configures, not when ninja builds. A
+# commit between the two left the first deployed 0.2.0 reporting the previous
+# commit as "-dirty". Re-run configure whenever HEAD, the index or the version
+# file change, so the binary says what the tree says.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/version.txt"
+    "${CMAKE_SOURCE_DIR}/.git/HEAD"
+    "${CMAKE_SOURCE_DIR}/.git/index")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(open3e-gateway)
