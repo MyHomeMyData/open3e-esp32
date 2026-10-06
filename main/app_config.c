@@ -280,6 +280,11 @@ void sys_cfg_get(sys_cfg_t *out)
         snprintf(k, sizeof(k), "c%d_ga", i);
         nvs_get_str_or(h, k, out->contact[i].knx_ga,
                        sizeof(out->contact[i].knx_ga), "");
+        snprintf(k, sizeof(k), "c%d_mode", i);
+        out->contact[i].mode = nvs_get_u8_or(h, k, CONTACT_MODE_INPUT) == CONTACT_MODE_OUTPUT
+                                   ? CONTACT_MODE_OUTPUT : CONTACT_MODE_INPUT;
+        snprintf(k, sizeof(k), "c%d_alow", i);
+        out->contact[i].active_low = nvs_get_u8_or(h, k, 0) != 0;
     }
     out->knx.enabled = nvs_get_u8_or(h, "knx_on", 0) != 0;
     out->knx.mode = nvs_get_u8_or(h, "knx_mode", KNX_MODE_TUNNELLING)
@@ -322,6 +327,10 @@ bool sys_cfg_set(const sys_cfg_t *in)
                                                     : CONTACT_RELEASE_MS);
         snprintf(k, sizeof(k), "c%d_ga", i);
         nvs_set_str(h, k, in->contact[i].knx_ga);
+        snprintf(k, sizeof(k), "c%d_mode", i);
+        nvs_set_u8(h, k, (uint8_t)in->contact[i].mode);
+        snprintf(k, sizeof(k), "c%d_alow", i);
+        nvs_set_u8(h, k, in->contact[i].active_low ? 1 : 0);
     }
     nvs_set_u8(h, "knx_on", in->knx.enabled ? 1 : 0);
     nvs_set_u8(h, "knx_mode", (uint8_t)in->knx.mode);

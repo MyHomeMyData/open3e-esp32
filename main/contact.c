@@ -1,4 +1,4 @@
-/* The pure half of the contact inputs: debouncing and naming.
+/* The pure half of the two pins: debouncing, naming, payload parsing.
  *
  * No FreeRTOS, no driver, no allocation -- so test/test_contact.c can run the
  * state machine against a synthesised bell signal on a workstation, which is
@@ -103,7 +103,7 @@ void contact_slug(const contact_cfg_t *cfg, int idx, char *out, size_t out_sz)
     /* No name: the same fallback the entity gets in Home Assistant, so the
      * two never disagree about what an unnamed input is called. */
     if (!n) {
-        snprintf(out, out_sz, "%s", contact_default_name(idx));
+        snprintf(out, out_sz, "%s", contact_default_name(cfg, idx));
         for (char *q = out; *q; q++) {
             if (*q == ' ') {
                 *q = '_';
@@ -114,8 +114,48 @@ void contact_slug(const contact_cfg_t *cfg, int idx, char *out, size_t out_sz)
     }
 }
 
-const char *contact_default_name(int idx)
+const char *contact_default_name(const contact_cfg_t *cfg, int idx)
 {
-    static const char *names[CONTACT_COUNT] = { "Eingang 1", "Eingang 2" };
-    return (idx >= 0 && idx < CONTACT_COUNT) ? names[idx] : "Eingang";
+    static const char *inputs[CONTACT_COUNT]  = { "Eingang 1", "Eingang 2" };
+    static const char *outputs[CONTACT_COUNT] = { "Ausgang 1", "Ausgang 2" };
+    bool out = cfg && cfg->mode == CONTACT_MODE_OUTPUT;
+    if (idx < 0 || idx >= CONTACT_COUNT) {
+        return out ? "Ausgang" : "Eingang";
+    }
+    return out ? outputs[idx] : inputs[idx];
+}
+
+bool contact_parse_onoff(const char *payload, size_t len, bool *on)
+{
+    /* Trailing whitespace is tolerated because a hand-typed mosquitto_pub
+     * payload often has a newline on it; leading junk is not. */
+    while (len && (payload[len - 1] == '\n' || payload[len - 1] == '\r' ||
+                   payload[len - 1] == ' ')) {
+        len--;
+    }
+    static const struct { const char *word; bool on; } words[] = {
+        { "ON", true }, { "1", true }, { "TRUE", true },
+        { "OFF", false }, { "0", false }, { "FALSE", false },
+    };
+    for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); w++) {
+        size_t wl = strlen(words[w].word);
+        if (wl != len) {
+            continue;
+        }
+        size_t i = 0;
+        for (; i < len; i++) {
+            char c = payload[i];
+            if (c >= 'a' && c <= 'z') {
+                c = (char)(c - 'a' + 'A');
+            }
+            if (c != words[w].word[i]) {
+                break;
+            }
+        }
+        if (i == len) {
+            *on = words[w].on;
+            return true;
+        }
+    }
+    return false;
 }

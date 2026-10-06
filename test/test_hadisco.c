@@ -420,6 +420,49 @@ int main(int argc, char **argv)
        m != NULL && m->payload[0] == '\0',
        m ? (m->payload[0] ? m->payload : "(empty)") : "(never published)");
 
+    /* --- an output --- */
+    reset(points, "open3e-vent/cmnd", "flat");
+    g_sys.contact[1].enabled = true;
+    g_sys.contact[1].mode = CONTACT_MODE_OUTPUT;
+    snprintf(g_sys.contact[1].name, sizeof(g_sys.contact[1].name), "SG Sperre");
+    ha_disco_publish_all();
+
+    m = find("homeassistant/switch/open3e_112233/contact2/config");
+    ok("an output is announced as a switch", m != NULL && m->payload[0], NULL);
+    if (m && m->payload[0]) {
+        cJSON *j = cJSON_Parse(m->payload);
+        ok("switch payload is valid JSON", j != NULL, m->payload);
+        if (j) {
+            const cJSON *st = cJSON_GetObjectItem(j, "state_topic");
+            const cJSON *ct = cJSON_GetObjectItem(j, "command_topic");
+            ok("switch reads its own output topic",
+               cJSON_IsString(st)
+                 && strcmp(st->valuestring, "open3e-vent/output/sg_sperre") == 0,
+               cJSON_IsString(st) ? st->valuestring : "(none)");
+            /* Its own set topic, not the shared command topic: ON and OFF
+               as payloads, nothing to template, and usable by anything that
+               is not Home Assistant. */
+            ok("switch commands its own set topic",
+               cJSON_IsString(ct)
+                 && strcmp(ct->valuestring, "open3e-vent/output/sg_sperre/set") == 0,
+               cJSON_IsString(ct) ? ct->valuestring : "(none)");
+            const cJSON *po = cJSON_GetObjectItem(j, "payload_on");
+            ok("switch sends plain ON",
+               cJSON_IsString(po) && strcmp(po->valuestring, "ON") == 0, m->payload);
+            cJSON_Delete(j);
+        }
+    }
+    /* The pin was a binary sensor before it became an output; that entity
+       has to go, or Home Assistant shows a sensor and a switch for one pin. */
+    m = find("homeassistant/binary_sensor/open3e_112233/contact2/config");
+    ok("an output's old sensor entity is retracted",
+       m != NULL && m->payload[0] == '\0',
+       m ? (m->payload[0] ? m->payload : "(empty)") : "(never published)");
+    /* And the other way round: the input on pin 1 must not grow a switch. */
+    m = find("homeassistant/switch/open3e_112233/contact1/config");
+    ok("an input has no switch entity",
+       m == NULL || m->payload[0] == '\0', m ? m->payload : "(never published)");
+
     printf("%s: %zu discovery messages inspected\n", fail ? "FAILED" : "ha_disco", g_n);
     return fail ? 1 : 0;
 }

@@ -9,6 +9,18 @@ Versionsnummer (`rawApiVersion`), siehe `docs/raw-gateway-api.md`.
 Vor 0.2.0 gab es keine Versionsnummern; 0.1.0 ist rückwirkend der Stand, der
 bis dahin auf der Flash-Seite lag.
 
+## Unveröffentlicht
+
+### Hinzugefügt
+
+- **Schaltausgänge** (#5, TheSmartGerman): GPIO1 und GPIO2 lassen sich je
+  Pin als Ausgang betreiben, etwa für ein Relais an den SG-Ready-Klemmen.
+  Zustand auf `<Basis>/output/<name>`, Befehl `ON`/`OFF` auf `…/set`, in
+  Home Assistant ein Schalter, `POST /api/output`, Befehlskanal-Modus
+  `output`, KNX-Meldung beim Schalten. Nach einem Neustart ist ein Ausgang
+  aus. Die Einstellungen bekommen je Pin `mode` und `activeLow`; ein
+  Backup ohne die Felder bleibt ein Eingang.
+
 ## 0.2.0 — 2026-10-06
 
 Raw-API-Version: 1.

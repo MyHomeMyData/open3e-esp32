@@ -602,24 +602,37 @@
 
   <div class="subpanel" id="sub-device">
   <div class="card" id="card-contacts">
-    <h2>Kontakteingänge</h2>
+    <h2>Kontakteingänge und Schaltausgänge</h2>
     <p class="hint">Der SH1.0-Stecker führt GND, 3V3, GPIO1 und GPIO2 heraus. Beide
-      Pins sind sonst unbenutzt und können einen Schalter lesen — Klingel,
-      Türkontakt, Schwimmerschalter, Störmeldekontakt. Jeder aktive Eingang wird
-      als <span class="mono">&lt;Basis&gt;/contact/&lt;name&gt;</span> gesendet und
-      erscheint in Home Assistant als binärer Sensor.</p>
+      Pins sind sonst unbenutzt. Als <b>Eingang</b> lesen sie einen Schalter —
+      Klingel, Türkontakt, Schwimmerschalter, Störmeldekontakt — und melden ihn
+      als <span class="mono">&lt;Basis&gt;/contact/&lt;name&gt;</span>, in Home
+      Assistant ein binärer Sensor. Als <b>Ausgang</b> schalten sie ein
+      Relaismodul, etwa für die SG-Ready-Klemmen der Wärmepumpe: Zustand auf
+      <span class="mono">&lt;Basis&gt;/output/&lt;name&gt;</span>, Befehl
+      <span class="mono">ON</span>/<span class="mono">OFF</span> auf
+      <span class="mono">…/set</span>, in Home Assistant ein Schalter. Ein Ausgang
+      ist nach jedem Neustart aus.</p>
     <div class="warnbox">
-      <b>Nur potentialfreie Kontakte.</b> An den Pins dürfen höchstens 3,3&nbsp;V
-      anliegen. Eine Klingel läuft mit 8–12&nbsp;V Wechselspannung und zerstört
-      den ESP32, wenn sie direkt angeklemmt wird — dazwischen gehört ein
-      Optokoppler oder ein Relais.
+      <b>Nur potentialfreie Kontakte, nur Relaismodule mit Treiber.</b> An den
+      Pins dürfen höchstens 3,3&nbsp;V anliegen, und sie liefern nur wenige
+      Milliampere. Eine Klingel läuft mit 8–12&nbsp;V Wechselspannung und
+      zerstört den ESP32, wenn sie direkt angeklemmt wird — dazwischen gehört
+      ein Optokoppler oder ein Relais. Ein Relais ohne Transistorstufe lässt
+      sich nicht direkt treiben.
     </div>
   <div class="row" style="align-items:flex-end">
       <label style="flex:0 0 auto"><span>GPIO1</span>
         <label class="small" style="margin:0"><input type="checkbox" id="ct0-on"> aktiv</label>
       </label>
+      <label style="flex:0 0 120px"><span>Betriebsart</span>
+        <select id="ct0-mode">
+          <option value="input">Eingang</option>
+          <option value="output">Ausgang</option>
+        </select>
+      </label>
       <label><span>Name</span><input type="text" id="ct0-name" placeholder="Eingang 1" maxlength="31"></label>
-      <label style="flex:0 0 170px"><span>Art</span>
+      <label style="flex:0 0 170px" class="ct-in"><span>Art</span>
         <select id="ct0-class">
           <option value="">– keine –</option>
           <option value="sound">Klingel</option>
@@ -634,25 +647,39 @@
           <option value="running">Läuft</option>
         </select>
       </label>
-      <label style="flex:0 0 190px"><span>Kontakt gegen</span>
+      <label style="flex:0 0 190px" class="ct-in"><span>Kontakt gegen</span>
         <select id="ct0-wire">
           <option value="gnd">GND (Pull-up)</option>
           <option value="3v3">3V3 (Pull-down)</option>
         </select>
       </label>
-      <label style="flex:0 0 130px"><span>Abfallzeit (ms)</span>
+      <label style="flex:0 0 130px" class="ct-in"><span>Abfallzeit (ms)</span>
         <input type="number" id="ct0-rel" min="20" max="5000" step="10" value="150"></label>
+      <label style="flex:0 0 190px" class="ct-out" hidden><span>Ein bedeutet</span>
+        <select id="ct0-alow">
+          <option value="high">Pin auf 3V3 (High)</option>
+          <option value="low">Pin auf GND (Low)</option>
+        </select>
+      </label>
       <label style="flex:0 0 130px"><span>KNX-Adresse</span>
         <input type="text" id="ct0-ga" placeholder="1/2/3" maxlength="15"></label>
     </div>
     <p class="small muted" style="margin:-2px 0 14px">Zustand:
-      <span class="mono" id="ct0-state">–</span></p>
+      <span class="mono" id="ct0-state">–</span>
+      <button type="button" class="ct-out" id="ct0-toggle" hidden
+        style="margin-left:10px">Einschalten</button></p>
   <div class="row" style="align-items:flex-end">
       <label style="flex:0 0 auto"><span>GPIO2</span>
         <label class="small" style="margin:0"><input type="checkbox" id="ct1-on"> aktiv</label>
       </label>
+      <label style="flex:0 0 120px"><span>Betriebsart</span>
+        <select id="ct1-mode">
+          <option value="input">Eingang</option>
+          <option value="output">Ausgang</option>
+        </select>
+      </label>
       <label><span>Name</span><input type="text" id="ct1-name" placeholder="Eingang 2" maxlength="31"></label>
-      <label style="flex:0 0 170px"><span>Art</span>
+      <label style="flex:0 0 170px" class="ct-in"><span>Art</span>
         <select id="ct1-class">
           <option value="">– keine –</option>
           <option value="sound">Klingel</option>
@@ -667,24 +694,38 @@
           <option value="running">Läuft</option>
         </select>
       </label>
-      <label style="flex:0 0 190px"><span>Kontakt gegen</span>
+      <label style="flex:0 0 190px" class="ct-in"><span>Kontakt gegen</span>
         <select id="ct1-wire">
           <option value="gnd">GND (Pull-up)</option>
           <option value="3v3">3V3 (Pull-down)</option>
         </select>
       </label>
-      <label style="flex:0 0 130px"><span>Abfallzeit (ms)</span>
+      <label style="flex:0 0 130px" class="ct-in"><span>Abfallzeit (ms)</span>
         <input type="number" id="ct1-rel" min="20" max="5000" step="10" value="150"></label>
+      <label style="flex:0 0 190px" class="ct-out" hidden><span>Ein bedeutet</span>
+        <select id="ct1-alow">
+          <option value="high">Pin auf 3V3 (High)</option>
+          <option value="low">Pin auf GND (Low)</option>
+        </select>
+      </label>
       <label style="flex:0 0 130px"><span>KNX-Adresse</span>
         <input type="text" id="ct1-ga" placeholder="1/2/3" maxlength="15"></label>
     </div>
     <p class="small muted" style="margin:-2px 0 14px">Zustand:
-      <span class="mono" id="ct1-state">–</span></p>
+      <span class="mono" id="ct1-state">–</span>
+      <button type="button" class="ct-out" id="ct1-toggle" hidden
+        style="margin-left:10px">Einschalten</button></p>
     <p class="small muted" style="margin:0 0 12px">Die <b>Abfallzeit</b> ist die
       Ruhe, nach der ein Kontakt wieder als offen gilt. 150&nbsp;ms genügen für
       einen Taster und überbrücken zugleich die Lücken eines über einen
       Optokoppler abgegriffenen Wechselspannungssignals. Höher stellen, wenn ein
       Klingeln als mehrere gezählt wird.</p>
+    <p class="small muted" style="margin:0 0 12px">Bei einem <b>Ausgang</b> gibt
+      <i>Ein bedeutet</i> an, welchen Pegel der Pin im eingeschalteten Zustand
+      hat. Die meisten günstigen Relaismodule schalten bei Low; die
+      KNX-Adresse bekommt bei jedem Schalten den neuen Zustand gemeldet. Die
+      Schaltung bleibt beim Speichern der Einstellungen erhalten, nach einem
+      Neustart ist der Ausgang aus.</p>
   </div>
 
   <div class="card">

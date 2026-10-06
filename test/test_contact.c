@@ -145,6 +145,36 @@ int main(void)
     snprintf(detail, sizeof(detail), "\"%s\"", tight);
     check("slug stays in its buffer", strlen(tight) < sizeof(tight), detail);
 
-    printf("%s: contact debounce and naming\n", fail ? "FAILED" : "contact");
+    /* An unnamed output is an "Ausgang", not an "Eingang", in the entity
+     * name and in the topic alike -- otherwise a relay shows up in Home
+     * Assistant labelled as an input. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.mode = CONTACT_MODE_OUTPUT;
+    char out[CONTACT_NAME_MAX * 2];
+    contact_slug(&cfg, 1, out, sizeof(out));
+    check("output default name", strcmp(contact_default_name(&cfg, 1), "Ausgang 2") == 0,
+          contact_default_name(&cfg, 1));
+    check("output default slug", strcmp(out, "ausgang_2") == 0, out);
+    cfg.mode = CONTACT_MODE_INPUT;
+    check("input default name", strcmp(contact_default_name(&cfg, 0), "Eingang 1") == 0,
+          contact_default_name(&cfg, 0));
+
+    /* What counts as ON and OFF on the set topic. Case-insensitive and
+     * tolerant of a trailing newline, because that is what a hand-typed
+     * mosquitto_pub sends; anything else is refused rather than guessed. */
+    static const struct { const char *in; int want; bool on; } pl[] = {
+        { "ON", 1, true }, { "on", 1, true }, { "1", 1, true }, { "true", 1, true },
+        { "OFF", 1, false }, { "off\n", 1, false }, { "0", 1, false }, { "False", 1, false },
+        { "", 0, false }, { "2", 0, false }, { "ON ON", 0, false }, { " ON", 0, false },
+        { "toggle", 0, false },
+    };
+    for (size_t i = 0; i < sizeof(pl) / sizeof(pl[0]); i++) {
+        bool on = !pl[i].on;
+        bool got = contact_parse_onoff(pl[i].in, strlen(pl[i].in), &on);
+        snprintf(detail, sizeof(detail), "\"%s\": parsed=%d on=%d", pl[i].in, got, on);
+        check("on/off payload", got == (pl[i].want != 0) && (!got || on == pl[i].on), detail);
+    }
+
+    printf("%s: contact debounce, naming and payloads\n", fail ? "FAILED" : "contact");
     return fail ? 1 : 0;
 }

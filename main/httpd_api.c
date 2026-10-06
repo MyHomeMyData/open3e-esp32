@@ -348,10 +348,12 @@ static esp_err_t h_status(httpd_req_t *r)
         contact_status_t cs;
         contact_status(i, &cs);
         snprintf(t, sizeof(t),
-                 "%s{\"pin\": %d, \"enabled\": %s, \"active\": %s, "
-                 "\"edges\": %u, \"sinceS\": %u, \"name\": ",
+                 "%s{\"pin\": %d, \"enabled\": %s, \"mode\": \"%s\", "
+                 "\"active\": %s, \"edges\": %u, \"sinceS\": %u, \"name\": ",
                  i ? ", " : "", CONTACT_PINS[i],
-                 cs.enabled ? "true" : "false", cs.active ? "true" : "false",
+                 cs.enabled ? "true" : "false",
+                 cs.mode == CONTACT_MODE_OUTPUT ? "output" : "input",
+                 cs.active ? "true" : "false",
                  (unsigned)cs.edges, (unsigned)cs.since_s);
         o3e_buf_adds(&b, t);
         o3e_buf_add_json_str(&b, sys.contact[i].name);
@@ -867,6 +869,39 @@ static esp_err_t h_read(httpd_req_t *r)
 
 /* Hold the grid setpoint. The caps live in grid_hold.c, not here: a limit
  * that only the web interface enforces is not a limit. */
+/* Switch a relay output: {"gpio": 1, "on": true}. The number is the GPIO as
+ * printed on the board and in the settings, not an index. */
+static esp_err_t h_output(httpd_req_t *r)
+{
+    char *body = read_body(r);
+    if (!body) {
+        return ESP_OK;
+    }
+    cJSON *j = cJSON_Parse(body);
+    free(body);
+    if (!j) {
+        return send_err(r, 400, "not valid JSON");
+    }
+    const cJSON *jg = cJSON_GetObjectItem(j, "gpio");
+    const cJSON *jo = cJSON_GetObjectItem(j, "on");
+    if (!cJSON_IsNumber(jg) || !cJSON_IsBool(jo)) {
+        cJSON_Delete(j);
+        return send_err(r, 400, "gpio (number) and on (bool) are required");
+    }
+    int gpio = (int)jg->valuedouble;
+    bool on = cJSON_IsTrue(jo);
+    cJSON_Delete(j);
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        if (CONTACT_PINS[i] == gpio) {
+            if (!contact_output_set(i, on)) {
+                return send_err(r, 400, "that pin is not an enabled output");
+            }
+            return send_json(r, "{\"ok\": true}");
+        }
+    }
+    return send_err(r, 400, "no such pin");
+}
+
 static esp_err_t h_grid(httpd_req_t *r)
 {
     char *body = read_body(r);
@@ -1639,10 +1674,14 @@ static void contacts_to_json(o3e_buf_t *b, const sys_cfg_t *sys)
 {
     o3e_buf_adds(b, "[");
     for (int i = 0; i < CONTACT_COUNT; i++) {
-        char t[96];
-        snprintf(t, sizeof(t), "%s{\"pin\": %d, \"enabled\": %s, \"name\": ",
+        char t[128];
+        snprintf(t, sizeof(t),
+                 "%s{\"pin\": %d, \"enabled\": %s, \"mode\": \"%s\", "
+                 "\"activeLow\": %s, \"name\": ",
                  i ? ", " : "", CONTACT_PINS[i],
-                 sys->contact[i].enabled ? "true" : "false");
+                 sys->contact[i].enabled ? "true" : "false",
+                 sys->contact[i].mode == CONTACT_MODE_OUTPUT ? "output" : "input",
+                 sys->contact[i].active_low ? "true" : "false");
         o3e_buf_adds(b, t);
         o3e_buf_add_json_str(b, sys->contact[i].name);
         o3e_buf_adds(b, ", \"deviceClass\": ");
@@ -1709,6 +1748,14 @@ static void contacts_from_json(const cJSON *arr, sys_cfg_t *sys)
         const cJSON *v;
         if (cJSON_IsBool(v = cJSON_GetObjectItem(o, "enabled"))) {
             sys->contact[i].enabled = cJSON_IsTrue(v);
+        }
+        /* Absent in a backup from before outputs existed: stays an input. */
+        if (cJSON_IsString(v = cJSON_GetObjectItem(o, "mode"))) {
+            sys->contact[i].mode = strcmp(v->valuestring, "output") == 0
+                                       ? CONTACT_MODE_OUTPUT : CONTACT_MODE_INPUT;
+        }
+        if (cJSON_IsBool(v = cJSON_GetObjectItem(o, "activeLow"))) {
+            sys->contact[i].active_low = cJSON_IsTrue(v);
         }
         copy_str(o, "name", sys->contact[i].name, sizeof(sys->contact[i].name));
         copy_str(o, "deviceClass", sys->contact[i].device_class,
@@ -2143,6 +2190,7 @@ static const httpd_uri_t routes[] = {
     { "/api/read",        HTTP_GET,  h_read,         NULL },
     { "/api/write",       HTTP_POST, h_write,        NULL },
     { "/api/grid",        HTTP_POST, h_grid,         NULL },
+    { "/api/output",      HTTP_POST, h_output,       NULL },
     { "/api/crash",       HTTP_GET,  h_crash,        NULL },
     { "/api/crash",       HTTP_DELETE, h_crash,      NULL },
     { "/api/rawread",     HTTP_GET,  h_rawread,      NULL },

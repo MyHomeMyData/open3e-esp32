@@ -166,10 +166,23 @@ function renderStatus(s) {
   (s.contacts || []).forEach((c, i) => {
     const el = $(`ct${i}-state`);
     if (!el) return;
+    const out = c.mode === "output";
     el.textContent = !c.enabled
       ? "aus"
-      : `${c.active ? "geschlossen" : "offen"} seit ${fmtDuration(c.sinceS)}` +
-        ` · ${c.edges} Auslösung${c.edges === 1 ? "" : "en"}`;
+      : out
+        ? `${c.active ? "eingeschaltet" : "ausgeschaltet"} seit ${fmtDuration(c.sinceS)}` +
+          ` · ${c.edges} Schaltung${c.edges === 1 ? "" : "en"}`
+        : `${c.active ? "geschlossen" : "offen"} seit ${fmtDuration(c.sinceS)}` +
+          ` · ${c.edges} Auslösung${c.edges === 1 ? "" : "en"}`;
+    /* The button switches the output as it is now, so its label follows the
+       reported state rather than the unsaved form. */
+    const btn = $(`ct${i}-toggle`);
+    if (btn) {
+      btn.hidden = !(c.enabled && out);
+      btn.textContent = c.active ? "Ausschalten" : "Einschalten";
+      btn.dataset.gpio = c.pin;
+      btn.dataset.on = c.active ? "0" : "1";
+    }
   });
 
   $("s-canstate").textContent = s.can.state;
@@ -1465,11 +1478,14 @@ async function loadSettings() {
   (s.system.contacts || []).forEach((c, i) => {
     if (!$(`ct${i}-on`)) return;
     $(`ct${i}-on`).checked = c.enabled;
+    $(`ct${i}-mode`).value = c.mode || "input";
     $(`ct${i}-name`).value = c.name || "";
     $(`ct${i}-class`).value = c.deviceClass || "";
     $(`ct${i}-wire`).value = c.wire || "gnd";
     $(`ct${i}-rel`).value = c.releaseMs || 150;
+    $(`ct${i}-alow`).value = c.activeLow ? "low" : "high";
     $(`ct${i}-ga`).value = c.knxGa || "";
+    contactModeChanged(i);
   });
   const k = s.system.knx || {};
   $("knx-on").checked = !!k.enabled;
@@ -1483,6 +1499,36 @@ async function loadSettings() {
       : "Schreiben ist gesperrt – in den Einstellungen freigeben.") +
     (s.system.rawWriteEnabled ? " Rohes Schreiben ist ebenfalls freigegeben." : "");
 }
+
+/* Show the fields that belong to the chosen direction. The row keeps its
+   shape otherwise, so switching back and forth does not reflow the card. */
+function contactModeChanged(i) {
+  const out = $(`ct${i}-mode`).value === "output";
+  const row = $(`ct${i}-mode`).closest(".row");
+  row.querySelectorAll(".ct-in").forEach((el) => { el.hidden = out; });
+  row.querySelectorAll(".ct-out").forEach((el) => { el.hidden = !out; });
+  $(`ct${i}-name`).placeholder = out ? `Ausgang ${i + 1}` : `Eingang ${i + 1}`;
+}
+
+[0, 1].forEach((i) => {
+  const sel = $(`ct${i}-mode`);
+  if (sel) sel.addEventListener("change", () => contactModeChanged(i));
+  const btn = $(`ct${i}-toggle`);
+  if (btn) btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await api("/api/output", { method: "POST", body: JSON.stringify({
+        gpio: Number(btn.dataset.gpio), on: btn.dataset.on === "1" }) });
+      /* The pin task applies it within a few milliseconds; refreshing right
+         away shows the new state instead of waiting a whole poll. */
+      setTimeout(poll, 200);
+    } catch (e) {
+      toast(`Schalten fehlgeschlagen: ${e.message || e}`, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
 
 async function saveSettings() {
   const body = {
@@ -1507,6 +1553,8 @@ async function saveSettings() {
       tz: $("sys-tz").value,
       ...(CAPS["card-contacts"] === false ? {} : { contacts: [0, 1].map((i) => ({
         enabled: $(`ct${i}-on`).checked,
+        mode: $(`ct${i}-mode`).value,
+        activeLow: $(`ct${i}-alow`).value === "low",
         name: $(`ct${i}-name`).value,
         deviceClass: $(`ct${i}-class`).value,
         wire: $(`ct${i}-wire`).value,

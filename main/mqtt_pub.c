@@ -239,6 +239,12 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
         if (cfg.cmnd_topic[0]) {
             esp_mqtt_client_subscribe(client, cfg.cmnd_topic, 0);
         }
+        /* The relay outputs, <base>/output/<name>/set. A wildcard, so a
+         * renamed output needs no resubscribe; subscribed even with no output
+         * configured, because one subscription is cheaper than tracking. */
+        char set_topic[CFG_TOPIC_MAX + 16];
+        snprintf(set_topic, sizeof(set_topic), "%s/output/+/set", cfg.base_topic);
+        esp_mqtt_client_subscribe(client, set_topic, 0);
         /* Handed to the control task rather than done here: this callback runs
          * on the client's own task, and blocking it stops the keepalive. */
         ctl_notify(CTL_ANNOUNCE);

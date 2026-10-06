@@ -1,4 +1,4 @@
-/* Potential-free contacts on the two spare pins.
+/* The two spare pins: potential-free contacts in, or relays out.
  *
  * The board brings GND, 3V3, GPIO1 and GPIO2 out on the SH1.0 connector, and
  * nothing on the board uses those two: the CAN transceiver sits on 15 and 16,
@@ -7,6 +7,13 @@
  * doorbell, a door contact, a float switch, a fault relay -- and the gateway
  * that is already in the boiler room reports it to the same broker as
  * everything else.
+ *
+ * Or, per pin, the other direction: an output driving a relay module. The
+ * heat pump's SG-Ready terminals are the reason -- the controller only reads
+ * them as contacts, there is no datapoint to write, so blocking the unit from
+ * an automation means a relay, and the gateway sitting next to the terminals
+ * is the obvious thing to switch it. An output is off after every boot: a
+ * lock that survives a reboot nobody remembers is worse than one that drops.
  *
  * The debouncing is the part worth having its own file: it is pure, it is
  * where the mistakes are, and it can be tested on a workstation instead of on
@@ -45,14 +52,25 @@ typedef enum {
     CONTACT_TO_3V3,
 } contact_wire_t;
 
+typedef enum {
+    CONTACT_MODE_INPUT = 0,
+    CONTACT_MODE_OUTPUT,
+} contact_mode_t;
+
 #define CONTACT_GA_MAX     16
 
 typedef struct {
     bool           enabled;
+    contact_mode_t mode;
     char           name[CONTACT_NAME_MAX];    /* shown in Home Assistant */
     char           device_class[CONTACT_CLASS_MAX];
+    /* Input only. */
     contact_wire_t wire;
     uint16_t       release_ms;
+    /* Output only: "on" drives the pin low instead of high. Most cheap relay
+     * modules switch on a low input, with an LED that would otherwise light
+     * up whenever the gateway is off. */
+    bool           active_low;
     /* KNX group address, empty to send nothing. One bit, DPT 1.001: closed
      * writes 1, open writes 0. Both are sent, because a group address that
      * only ever receives a 1 stays at 1 -- the next reader of that address
@@ -93,9 +111,14 @@ void contact_deb_reset(contact_deb_t *st, uint32_t now_ms);
 bool contact_deb_step(contact_deb_t *st, bool raw_active, uint32_t now_ms,
                       uint16_t release_ms);
 
-/* What an input is called when nobody has named it: deliberately generic,
- * because the pins are generic. "Eingang 1", "Eingang 2". */
-const char *contact_default_name(int idx);
+/* What a pin is called when nobody has named it: deliberately generic,
+ * because the pins are generic. "Eingang 1", "Eingang 2" -- or "Ausgang". */
+const char *contact_default_name(const contact_cfg_t *cfg, int idx);
+
+/* Whether `payload` means on, off, or neither: ON/OFF, 1/0, true/false, in
+ * any case. Shared by the MQTT set topic and the command listener so the two
+ * never disagree about what counts as a switch-on. */
+bool contact_parse_onoff(const char *payload, size_t len, bool *on);
 
 /* Topic-safe name for one input: the configured name folded to lower case
  * with the German umlauts spelled out, or the default name when it has none.
@@ -106,10 +129,11 @@ void contact_slug(const contact_cfg_t *cfg, int idx, char *out, size_t out_sz);
 /* ---- the task ----------------------------------------------------- */
 
 typedef struct {
-    bool     enabled;
-    bool     active;
-    uint32_t edges;
-    uint32_t since_s;      /* how long the current state has held */
+    bool           enabled;
+    contact_mode_t mode;
+    bool           active;     /* input closed, or output switched on */
+    uint32_t       edges;      /* activations: rings, or switch-ons */
+    uint32_t       since_s;    /* how long the current state has held */
 } contact_status_t;
 
 /* Configures the enabled pins and starts sampling. Safe to call again after a
@@ -120,5 +144,13 @@ void contact_status(int idx, contact_status_t *out);
 /* Republish the current states, retained. Called after an MQTT (re)connect so
  * a broker that lost its retained set is filled in again. */
 void contact_publish(void);
+
+/* Switch an output. False when the pin is not an enabled output. Only records
+ * the wish: the sampling task drives the pin and publishes the change, so
+ * this is safe from the MQTT client's task, the web server and a KNX
+ * telegram alike. */
+bool contact_output_set(int idx, bool on);
+/* The same, addressed by topic name, for <base>/output/<slug>/set. */
+bool contact_output_set_by_slug(const char *slug, bool on);
 
 #endif /* O3E_CONTACT_H */

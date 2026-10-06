@@ -665,12 +665,16 @@ static void ha_disco_walk_selection(bool clear)
 static void publish_extra_entity(const mqtt_cfg_t *cfg, const char *dev_id,
                                  const char *component, const char *object,
                                  const char *name, const char *state,
-                                 const char *extra, bool clear)
+                                 const char *cmd, const char *extra, bool clear)
 {
     /* Anything that only reads needs no command topic and counts as a sensor;
-     * everything else is an operable control. */
+     * everything else is an operable control. `cmd` is where a control is
+     * told what to do; NULL means the shared command topic. */
     bool is_sensor = strcmp(component, "sensor") == 0 ||
                      strcmp(component, "binary_sensor") == 0;
+    if (!cmd) {
+        cmd = cfg->cmnd_topic;
+    }
 
     char topic[352];
     snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
@@ -683,7 +687,7 @@ static void publish_extra_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     /* A switch or a number with nowhere to send is furniture: it would sit in
      * Home Assistant looking operable and do nothing. The countdown is worth
      * having either way, since it only reads. */
-    if (!is_sensor && !cfg->cmnd_topic[0]) {
+    if (!is_sensor && !cmd[0]) {
         return;
     }
 
@@ -700,9 +704,9 @@ static void publish_extra_entity(const mqtt_cfg_t *cfg, const char *dev_id,
     char uid[160];
     snprintf(uid, sizeof(uid), "%s_%s", dev_id, object);
     o3e_buf_add_json_str(&b, uid);
-    if (!is_sensor && cfg->cmnd_topic[0]) {
+    if (!is_sensor) {
         o3e_buf_adds(&b, ", \"command_topic\": ");
-        o3e_buf_add_json_str(&b, cfg->cmnd_topic);
+        o3e_buf_add_json_str(&b, cmd);
     }
     o3e_buf_adds(&b, ", ");
     o3e_buf_adds(&b, extra);
@@ -728,7 +732,7 @@ static void publish_hold_entity(const mqtt_cfg_t *cfg, const char *dev_id,
 {
     char state[CFG_TOPIC_MAX + 8];
     snprintf(state, sizeof(state), "%s/hold", cfg->base_topic);
-    publish_extra_entity(cfg, dev_id, component, object, name, state, extra, clear);
+    publish_extra_entity(cfg, dev_id, component, object, name, state, NULL, extra, clear);
 }
 
 static void ha_disco_grid(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
@@ -797,13 +801,18 @@ void ha_disco_counts(int *sensors, int *controls)
 void ha_disco_publish_all(void) { ha_disco_walk_selection(false); }
 void ha_disco_clear_all(void)   { ha_disco_walk_selection(true); }
 
-/* The two contact inputs, one binary sensor each.
+/* The two pins: a binary sensor per input, a switch per output.
  *
- * A doorbell is the reason these exist, and a doorbell is worth exactly one
- * entity: it is on while somebody is pressing and off otherwise. The device
- * class is the user's, because only they know whether the thing on the wire
- * is a bell, a door, a float switch or a fault relay -- and the class is what
- * decides the icon and the wording Home Assistant uses for both states.
+ * A doorbell is the reason the inputs exist, and a doorbell is worth exactly
+ * one entity: it is on while somebody is pressing and off otherwise. The
+ * device class is the user's, because only they know whether the thing on
+ * the wire is a bell, a door, a float switch or a fault relay -- and the
+ * class is what decides the icon and the wording Home Assistant uses for
+ * both states.
+ *
+ * An output is a switch whose command topic is its own <base>/output/<name>/set
+ * rather than the shared command topic: ON and OFF as payloads, nothing to
+ * template, and it works the same for whoever is not Home Assistant.
  */
 static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool clear)
 {
@@ -813,26 +822,48 @@ static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool cl
     for (int i = 0; i < CONTACT_COUNT; i++) {
         char object[32];
         snprintf(object, sizeof(object), "contact%d", i + 1);
+        bool output = sys.contact[i].mode == CONTACT_MODE_OUTPUT;
 
-        /* A disabled input is retracted rather than skipped: switching one off
-         * has to remove its entity, or Home Assistant keeps an entity that is
-         * permanently unavailable and nothing says why. */
-        if (clear || !sys.contact[i].enabled) {
-            char topic[352];
+        /* Retracted rather than skipped: switching a pin off has to remove
+         * its entity, or Home Assistant keeps one that is permanently
+         * unavailable and nothing says why. The same pin may have been the
+         * other kind a moment ago, so the other component's entity goes too;
+         * retracting what was never announced is a harmless empty publish. */
+        char topic[352];
+        if (clear || !sys.contact[i].enabled || output) {
             snprintf(topic, sizeof(topic), "%s/binary_sensor/%s/%s/config",
                      cfg->ha_prefix, dev_id, object);
             mqtt_pub_raw(topic, "", true);
+        }
+        if (clear || !sys.contact[i].enabled || !output) {
+            snprintf(topic, sizeof(topic), "%s/switch/%s/%s/config",
+                     cfg->ha_prefix, dev_id, object);
+            mqtt_pub_raw(topic, "", true);
+        }
+        if (clear || !sys.contact[i].enabled) {
             if (clear) {
-                n_sensors++;
+                *(output ? &n_controls : &n_sensors) += 1;
             }
             continue;
         }
 
         char slug[CONTACT_NAME_MAX * 2];
         contact_slug(&sys.contact[i], i, slug, sizeof(slug));
+        const char *name = sys.contact[i].name[0] ? sys.contact[i].name
+                                                  : contact_default_name(&sys.contact[i], i);
         char state[CFG_TOPIC_MAX + sizeof(slug) + 16];
-        snprintf(state, sizeof(state), "%s/contact/%s", cfg->base_topic, slug);
 
+        if (output) {
+            snprintf(state, sizeof(state), "%s/output/%s", cfg->base_topic, slug);
+            char cmd[sizeof(state) + 4];
+            snprintf(cmd, sizeof(cmd), "%s/set", state);
+            publish_extra_entity(cfg, dev_id, "switch", object, name, state, cmd,
+                                 "\"payload_on\": \"ON\", \"payload_off\": \"OFF\", "
+                                 "\"icon\": \"mdi:electric-switch\"", false);
+            continue;
+        }
+
+        snprintf(state, sizeof(state), "%s/contact/%s", cfg->base_topic, slug);
         char extra[192];
         int o = snprintf(extra, sizeof(extra),
                          "\"payload_on\": \"ON\", \"payload_off\": \"OFF\"");
@@ -840,10 +871,7 @@ static void ha_disco_contacts(const mqtt_cfg_t *cfg, const char *dev_id, bool cl
             snprintf(extra + o, sizeof(extra) - o, ", \"device_class\": \"%s\"",
                      sys.contact[i].device_class);
         }
-
-        const char *name = sys.contact[i].name[0] ? sys.contact[i].name
-                                                  : contact_default_name(i);
         publish_extra_entity(cfg, dev_id, "binary_sensor", object, name, state,
-                             extra, false);
+                             NULL, extra, false);
     }
 }

@@ -129,6 +129,9 @@ section.active { display: block; }
 .kv .v { font-size: 17px; font-variant-numeric: tabular-nums; margin-top: 2px; }
 
 label { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+/* The attribute must win over the display rules above, or hiding a label
+   (the fields that belong to the other pin direction) does nothing. */
+[hidden] { display: none !important; }
 label > span { display: block; margin-bottom: 4px; }
 
 input[type=text], input[type=password], input[type=number], select {

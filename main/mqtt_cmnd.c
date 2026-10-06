@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 
 #include "app_config.h"
+#include "contact.h"
 #include "hold.h"
 #include "mqtt_pub.h"
 #include "o3e_db.h"
@@ -199,6 +200,28 @@ static void do_storage(uint16_t ecu, const cJSON *root)
     }
 }
 
+/* {"mode": "output", "gpio": 1, "on": true} -- the same thing the set topic
+ * does, for automations that already talk to the command topic. */
+static void do_output(const cJSON *root)
+{
+    const cJSON *jg = cJSON_GetObjectItem(root, "gpio");
+    const cJSON *jo = cJSON_GetObjectItem(root, "on");
+    if (!cJSON_IsNumber(jg) || !cJSON_IsBool(jo)) {
+        reply_error("output: \"gpio\" (number) and \"on\" (bool) are required");
+        return;
+    }
+    int gpio = (int)jg->valuedouble;
+    for (int i = 0; i < CONTACT_COUNT; i++) {
+        if (CONTACT_PINS[i] == gpio) {
+            if (!contact_output_set(i, cJSON_IsTrue(jo))) {
+                reply_error("output: GPIO%d is not an enabled output", gpio);
+            }
+            return;
+        }
+    }
+    reply_error("output: no such pin GPIO%d", gpio);
+}
+
 static void do_write(uint16_t ecu, const cJSON *data)
 {
     if (!cJSON_IsObject(data)) {
@@ -254,11 +277,41 @@ static void cmnd_task(void *arg)
     }
 }
 
+/* <base>/output/<slug>/set with ON or OFF. Handled right here on the client's
+ * task: it only records a wish for the pin task, nothing blocks. */
+static bool output_set_topic(const mqtt_cfg_t *cfg, const char *topic, int topic_len,
+                             const char *data, int data_len)
+{
+    char prefix[CFG_TOPIC_MAX + 16];
+    int pl = snprintf(prefix, sizeof(prefix), "%s/output/", cfg->base_topic);
+    if (topic_len <= pl + 4 || strncmp(topic, prefix, (size_t)pl) != 0 ||
+        strncmp(topic + topic_len - 4, "/set", 4) != 0) {
+        return false;
+    }
+    char slug[CONTACT_NAME_MAX * 2];
+    int sl = topic_len - pl - 4;
+    if (sl <= 0 || sl >= (int)sizeof(slug)) {
+        return true;
+    }
+    memcpy(slug, topic + pl, (size_t)sl);
+    slug[sl] = '\0';
+    bool on;
+    if (!contact_parse_onoff(data, (size_t)(data_len > 0 ? data_len : 0), &on)) {
+        reply_error("output %s: payload must be ON or OFF", slug);
+    } else if (!contact_output_set_by_slug(slug, on)) {
+        reply_error("output %s: no enabled output by that name", slug);
+    }
+    return true;
+}
+
 void mqtt_cmnd_dispatch(const char *topic, int topic_len,
                         const char *data, int data_len)
 {
     mqtt_cfg_t cfg;
     mqtt_cfg_get(&cfg);
+    if (output_set_topic(&cfg, topic, topic_len, data, data_len)) {
+        return;
+    }
     if ((int)strlen(cfg.cmnd_topic) != topic_len ||
         strncmp(cfg.cmnd_topic, topic, (size_t)topic_len) != 0) {
         return;
@@ -311,6 +364,8 @@ static void execute(const char *payload)
         do_grid(ecu, root);
     } else if (strcmp(mode->valuestring, "storage") == 0) {
         do_storage(ecu, root);
+    } else if (strcmp(mode->valuestring, "output") == 0) {
+        do_output(root);
     } else if (strcmp(mode->valuestring, "read-raw") == 0 ||
                strcmp(mode->valuestring, "write-raw") == 0) {
         /* open3e's raw modes exchange undecoded hex. Not implemented here:
@@ -318,7 +373,7 @@ static void execute(const char *payload)
          * the easiest way to put a heat pump into a state nobody intended. */
         reply_error("mode '%s' is not supported by this gateway", mode->valuestring);
     } else {
-        reply_error("bad mode '%s'; supported: read, write, grid, storage",
+        reply_error("bad mode '%s'; supported: read, write, grid, storage, output",
                     mode->valuestring);
     }
     cJSON_Delete(root);
