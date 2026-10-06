@@ -67,6 +67,10 @@ Danach spannt das Gerät einen WLAN-Hotspot auf, das Captive Portal öffnet die
 Einrichtungsseite von selbst. WLAN eintragen → Neustart → erreichbar unter
 `http://open3e.local`. Ab hier passiert alles im Browser.
 
+Wie der Einbau neben der Heizung konkret aussieht, von der Unterverteilung
+bis zum Stecker für die gelbe Buchse 91, steht mit Fotos in
+[aufbau-praxis.md](https://github.com/boonkerz/open3e-esp32/blob/main/docs/aufbau-praxis.md).
+
 ## Der Bus-Scan
 
 Das Gegenstück zu `Open3E_depictSystem` auf dem Pi, nur dass das Ergebnis auf
