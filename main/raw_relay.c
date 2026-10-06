@@ -21,6 +21,11 @@ typedef struct {
     uint8_t  len;
 } raw_frame_t;
 
+/* A multi-frame broadcast arrives as one burst of about 26 frames (DID 954,
+ * 181 bytes) that the publish task cannot drain in time. Sized like the
+ * receive queue in can_port.c, with room for the next such burst. */
+#define RAW_RELAY_QUEUE_LEN 64
+
 static uint16_t          listen_ids[RAW_RELAY_MAX_IDS];
 static uint8_t           n_listen;
 static QueueHandle_t     frame_q;
@@ -100,7 +105,7 @@ bool raw_relay_start(const uint16_t *ids, size_t n)
     if (running) {
         raw_relay_stop();
     }
-    frame_q = xQueueCreate(16, sizeof(raw_frame_t));
+    frame_q = xQueueCreate(RAW_RELAY_QUEUE_LEN, sizeof(raw_frame_t));
     if (!frame_q) {
         return false;
     }
