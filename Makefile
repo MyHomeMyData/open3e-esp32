@@ -2,7 +2,7 @@
 
 PY := .venv/bin/python
 
-.PHONY: help setup db fixtures test sanitize storage lint fwinfo site deploy clean
+.PHONY: install-pull help setup db fixtures test sanitize storage lint fwinfo site deploy clean
 
 help:
 	@echo "make setup     create the Python venv and fetch open3e"
@@ -77,6 +77,21 @@ deploy: site
 	tar -C build/site -czf - . | \
 	  ssh $(DEPLOY_HOST) "mkdir -p $(DEPLOY_PATH) && tar -C $(DEPLOY_PATH) -xzf -"
 	@echo "-> https://esp32can.thomas-peterson.de"
+
+# The server pulls the page from GitHub Actions on its own (site/pull/): the
+# runners cannot reach a host on a home network, so pushing from CI never
+# worked. This installs script and timer; the token has to be put at
+# /etc/esp32can-site/token on the host by hand -- it does not belong in a
+# Makefile, and not on this machine either.
+install-pull:
+	@test -n "$(DEPLOY_HOST)" || { echo "DEPLOY_HOST is not set -- see .deploy.mk in the Makefile"; exit 1; }
+	tar -C site/pull -czf - . | ssh $(DEPLOY_HOST) '\
+	  set -e; d=$$(mktemp -d); tar -C $$d -xzf -; \
+	  install -m 755 $$d/esp32can-site-pull.py /usr/local/bin/; \
+	  install -m 644 $$d/esp32can-site-pull.service $$d/esp32can-site-pull.timer /etc/systemd/system/; \
+	  install -d -m 700 /etc/esp32can-site /var/lib/esp32can-site; rm -rf $$d; \
+	  systemctl daemon-reload; systemctl enable --now esp32can-site-pull.timer; \
+	  systemctl list-timers esp32can-site-pull.timer --no-pager'
 
 clean:
 	$(MAKE) -C test clean

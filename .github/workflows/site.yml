@@ -1,8 +1,8 @@
 # Build the firmware and publish the browser-flashing site.
 #
-# A tag fills the `release` slot, a push to main fills `dev`. Both live side by
-# side on the server, which is why rsync runs without --delete: this job only
-# produced one of the two channels and must not remove the other.
+# A tag fills the `release` slot, a push to main fills `dev`. Each run leaves
+# its channel as an artifact; the web server fetches the newest one of each
+# (site/pull/) and keeps the other channel's files untouched.
 name: site
 
 on:
@@ -82,27 +82,8 @@ jobs:
           path: build/site
           retention-days: 30
 
-      - name: Deploy
-        # Skipped unless a host is configured. The GitHub-hosted runner has to
-        # be able to reach it, so a LAN address will not do -- see site/README.
-        if: vars.DEPLOY_HOST != ''
-        env:
-          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          HOST: ${{ vars.DEPLOY_HOST }}
-          PATH_ON_HOST: ${{ vars.DEPLOY_PATH }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq openssh-client; }
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          # A pinned host key rather than StrictHostKeyChecking=no: without it
-          # the deploy would trust whatever answers, which is the whole attack.
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          # tar, not rsync: same reason as `make deploy` -- the target has no
-          # rsync, and nothing here is worth installing one for.
-          tar -C build/site -czf - . | \
-            ssh -i ~/.ssh/id_deploy -o IdentitiesOnly=yes "$HOST" \
-                "mkdir -p '$PATH_ON_HOST' && tar -C '$PATH_ON_HOST' -xzf -"
+      # No deploy step: the web server sits on a home network, out of reach of
+      # GitHub's runners, so it pulls the artifact above itself -- see
+      # site/pull/ and `make install-pull`. A push from here was skipped for
+      # weeks without anyone noticing (issue #3), which is the argument for
+      # a pull with a log on the far side.

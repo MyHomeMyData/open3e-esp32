@@ -10,7 +10,7 @@ in den Flash der Heizungssteuerung.
 ## Aufbau nach dem Ausrollen
 
     index.html
-    manifest-release.json     aus manifest.json.in, @VERSION@/@CHANNEL@ ersetzt
+    manifest-release.json     aus tools/build_site.py, Version aus dem Image
     manifest-dev.json
     bin/release/*.bin         die fünf Abschnitte des jeweiligen Standes
     bin/dev/*.bin
@@ -33,11 +33,43 @@ startet. Nach jeder Änderung an `partitions.csv` gehören diese Zahlen geprüft
 
 ## Bauen und ausrollen
 
-    make site      # Firmware bauen und site/ nach build/site/ zusammenstellen
-    make deploy    # das Ergebnis auf den Webserver schieben
+Den Normalfall erledigt GitHub Actions: jeder Push auf `main` baut die
+Firmware, lässt die Host-Tests laufen und legt die fertige Seite als Artefakt
+`site-dev` ab; ein Tag `v*` genauso als `site-release`. Der Webserver holt
+sich diese Artefakte selbst (`pull/`, unten) — GitHubs Runner erreichen eine
+Maschine im Heimnetz nicht, und ein Deploy-Schritt, der deshalb stumm
+übersprungen wird, hat die Seite einmal einen Monat lang veralten lassen (#3).
 
-`make site` erzeugt beide Kanäle aus demselben Build; `CHANNEL=dev make site`
-legt ihn unter `bin/dev/` ab.
+Von Hand, etwa um einen lokalen Stand zu testen:
+
+    make site      # Firmware muss gebaut sein; site/ nach build/site/ zusammenstellen
+    make deploy    # das Ergebnis per ssh auf den Webserver schieben
+
+`CHANNEL=release make site` legt den Build unter `bin/release/` ab, Standard
+ist `dev`. Der nächste Lauf des Timers überschreibt einen manuellen Stand nur,
+wenn GitHub inzwischen einen neueren erfolgreichen Lauf hat.
+
+### pull/ — der Server holt sich die Seite
+
+    esp32can-site-pull.py        fragt die GitHub-API nach dem neuesten erfolgreichen
+                                 Lauf je Kanal, lädt site-<kanal>.zip, entpackt es
+    esp32can-site-pull.service   oneshot, läuft als root mit ProtectSystem=strict
+    esp32can-site-pull.timer     alle 5 Minuten, 2 Minuten nach dem Booten
+
+Installieren mit `make install-pull` (nutzt `DEPLOY_HOST` aus `.deploy.mk`).
+Das Skript erwartet ein GitHub-Token in `/etc/esp32can-site/token` (Modus
+0600): ein *fine-grained personal access token* für dieses Repository mit
+der einzigen Berechtigung **Actions: Read** — Artefakte lassen sich auch bei
+öffentlichen Repositories nur angemeldet herunterladen. Es merkt sich die
+zuletzt installierte Run-ID in `/var/lib/esp32can-site/state.json` und lädt
+nur, wenn sich die geändert hat.
+
+    journalctl -u esp32can-site-pull.service -n 20    # was zuletzt passiert ist
+    systemctl start esp32can-site-pull.service        # jetzt holen statt warten
+
+Beim Einspielen wird erst `bin/<kanal>/` per Umbenennen getauscht und dann das
+Manifest ersetzt — ein Browser sieht nie ein Manifest, dessen Binärdateien
+noch fehlen. Die Dateien des anderen Kanals bleiben unberührt.
 
 ## Voraussetzungen auf dem Server
 

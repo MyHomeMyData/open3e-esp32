@@ -172,9 +172,10 @@ oder **Chrome für Android** ab 151. Safari und iOS können es nicht — WebKit
 lehnt Web Serial ab; die Seite sagt das, statt einen wirkungslosen Knopf zu
 zeigen.
 
-Die Seite liegt in [`site/`](site/) und wird mit `make site` gebaut und mit
-`make deploy` ausgerollt; die Binärdateien und das Manifest entstehen aus dem
-Build, damit die Flash-Offsets nicht von `partitions.csv` abweichen können.
+Die Seite liegt in [`site/`](site/). GitHub Actions baut sie bei jedem Push,
+der Webserver holt sich das Ergebnis selbst (siehe [`site/README.md`](site/README.md));
+die Binärdateien und das Manifest entstehen aus dem Build, damit die
+Flash-Offsets nicht von `partitions.csv` abweichen können.
 
 Wer selbst entwickelt, nimmt den Weg darunter.
 

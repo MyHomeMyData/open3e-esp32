@@ -1,0 +1,15 @@
+# Pulls the flash page from the latest GitHub Actions artifact.
+# Installed by `make install-pull`; see site/README.md.
+[Unit]
+Description=Fetch the open3e flash page from GitHub Actions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/esp32can-site-pull.py
+# The token is the only secret involved; keep the rest of the box out of it.
+ProtectSystem=strict
+ReadWritePaths=/var/www/esp32can /var/www /var/lib/esp32can-site
+PrivateTmp=true
+NoNewPrivileges=true
